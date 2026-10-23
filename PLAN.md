@@ -15,7 +15,7 @@ Build plan for Tushar Patel's INFO7375 final project. Every chat in this Project
 ## Current status
 
 - **Phase:** 0 — Setup and Go basics
-- **Next task:** T0.2
+- **Next task:** T0.3
 - **Last updated:** Oct 23, 2026
 
 ---
@@ -55,7 +55,7 @@ In FRICTIONAL.md, link to personal-repo commits by full URL so a grader can open
 - 🔎 **Research:** Claude Code plan mode, permission settings, and CLAUDE.md (code.claude.com/docs).
 - **Done when:** all four tools print a version, and the test API call works with the harness key.
 
-**T0.2 Create the repo**
+**T0.2 Create the repo** ✅ Done Oct 23: public repo github.com/tushar-patel28/agent-proving-ground, first commit df7b1bd pushed to main; `go build ./...` printed `go: warning: "./..." matched no packages`, exit 0
 1. Create `~/Documents/agent-proving-ground`. Run `git init`.
 2. Add `.gitignore` first (`.env`, `/bin/`, `/dist/`, OS and editor files). Commit.
 3. Copy `PLAN.md` and `CLAUDE.md` (from this chat) into the repo root.
@@ -285,12 +285,13 @@ Goal: one task, one Docker container, one trace file, one PASS/FAIL line.
 | D10 | Oct 23 | Task contracts in JSON (standard library only) | Decided (Oct 23) |
 | D11 | Oct 23 | Verdict comes only from the harness-run hidden check | Decided (Oct 23) |
 | D12 | Oct 23 | Gate bound to the SHA-256 of the diff shown; batch mode always defers | Decided (Oct 23) |
+| D13 | Oct 23 | Personal repo public from the start | Decided |
 
 ---
 
 ## Open questions
 
-- Ask the TA: OK for the personal repo to be public before Dec 20? OK for FRICTIONAL.md to link personal-repo commits?
+- Ask the TA: OK for FRICTIONAL.md to link personal-repo commits?
 
 ---
 
