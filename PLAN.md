@@ -15,7 +15,7 @@ Build plan for Tushar Patel's INFO7375 final project. Every chat in this Project
 ## Current status
 
 - **Phase:** 0 — Setup and Go basics
-- **Next task:** T0.4
+- **Next task:** T0.5
 - **Last updated:** Nov 3, 2026
 
 ---
@@ -27,7 +27,7 @@ Build plan for Tushar Patel's INFO7375 final project. Every chat in this Project
 3. **Claude Code implements.** Keep permission prompts on for commands and edits.
 4. **Tushar reviews:** read the diff, run `go vet ./...` and `go test ./...`, and run the task's "Done when" check by hand.
 5. **Commit** with the task ID in the message: `T1.2: kind sandbox via os/exec`.
-6. **Log:** write one FRICTIONAL.md entry in your own words (what you tried, what broke, what you accepted or rejected from Claude Code). Tick the task here, in the same commit.
+6. **Log:** tell the claude.ai Project chat what went wrong or what you rejected (it keeps the friction log). Tushar writes FRICTIONAL.md at the end. Tick the task here, in the same commit.
 
 ## Course repo sync (at every milestone)
 
@@ -40,7 +40,7 @@ The personal repo is where the work happens, at your own pace. The course folder
 
 In FRICTIONAL.md, link to personal-repo commits by full URL so a grader can open them.
 
-**Driver's seat (what stays Tushar's):** task contracts and checks, the permission policy rules and their tests, the stop and gate contracts and their tests, the dev/held-out split, the premortem, every claim in the packet, and FRICTIONAL.md. Claude Code does plumbing, refactors, and boilerplate, and Tushar must be able to explain every line it writes.
+**Driver's seat (what stays Tushar's):** task contracts and checks, the permission policy rules and their tests, the stop and gate contracts and their tests, the premortem choice, the dev/held-out split, FRICTIONAL.md, and sign-off. Packet docs are drafted by Claude Code and reviewed by Tushar (D17). Claude Code does plumbing, refactors, and boilerplate, and Tushar must be able to explain every line it writes.
 
 ---
 
@@ -73,7 +73,7 @@ In FRICTIONAL.md, link to personal-repo commits by full URL so a grader can open
 - 🔎 **Research:** all of the above. This is the main Go learning stretch.
 - **Done when:** you wrote and can explain the exercise without help.
 
-**T0.4 Packet first drafts and logs**
+**T0.4 Packet first drafts and logs** ✅ Done Nov 3: drafted by Claude Code, reviewed by Tushar
 1. `docs/01-brief.md`: adapt PROJECT-BRIEF.md to the Go stack.
 2. `docs/02-data-boundary.md`: every source labeled (tasks: synthetic; traces: synthetic; API key: credential, never stored).
 3. `docs/06-premortem.md`: at least 3 predicted failures, written now, before the build. One of them becomes the controlled failure in Phase 6.
@@ -122,7 +122,7 @@ Goal: one task, one kind pod, one trace file, one PASS/FAIL line.
 - 🔎 **Research:** Claude tool use (how tool_use and tool_result messages work), the Go SDK tool-use example.
 - **Done when:** `apg run 001` prints PASS or FAIL, and the trace lists every step.
 
-**Fallback (Thu Nov 12):** if task 001 cannot run on kind by Thu Nov 12, Claude Code writes `internal/sandbox/docker.go`. Log why in FRICTIONAL.md and the Decision log.
+**Fallback (Thu Nov 12):** if task 001 cannot run on kind by Thu Nov 12, Claude Code writes `internal/sandbox/docker.go`. Log why (friction log in the claude.ai Project, then FRICTIONAL.md at the end) and the Decision log.
 
 **Milestone M1:** first slice works end to end on kind.
 
@@ -299,6 +299,7 @@ Goal: one task, one kind pod, one trace file, one PASS/FAIL line.
 | D14 | Nov 3 | Claude Code writes the agent loop (pitch said hand-written; noted in README changes and driver's seat) | Decided |
 | D15 | Nov 3 | Add apg compare, denied column, apg show, FAILURES.md, demo.sh | Decided |
 | D16 | Nov 3 | Kubernetes (kind) from the start; Docker sandbox only as fallback after Nov 12 | Decided |
+| D17 | Nov 3 | Claude Code drafts packet docs; Tushar reviews | Decided |
 
 ---
 
