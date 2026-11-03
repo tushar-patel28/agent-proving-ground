@@ -314,3 +314,4 @@ Goal: one task, one kind pod, one trace file, one PASS/FAIL line.
 | ID | Date | Milestone | Evidence (commit / file) |
 |---|---|---|---|
 | — | Oct 22 | Pitch film resubmitted with the Go stack; graded 50/50 | course repo commit e9bef08 |
+| M0 | Nov 3 | Toolchain works, public repo exists, premortem committed; synced to the course folder | course repo commit 73af1fc (from agent-proving-ground@2a1a722) |
