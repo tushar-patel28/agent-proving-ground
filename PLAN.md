@@ -15,8 +15,8 @@ Build plan for Tushar Patel's INFO7375 final project. Every chat in this Project
 ## Current status
 
 - **Phase:** 0 — Setup and Go basics
-- **Next task:** T0.3
-- **Last updated:** Oct 23, 2026
+- **Next task:** T0.4
+- **Last updated:** Nov 3, 2026
 
 ---
 
@@ -65,7 +65,7 @@ In FRICTIONAL.md, link to personal-repo commits by full URL so a grader can open
 - 🔎 **Research:** pick a license (MIT vs Apache-2.0); Go module paths.
 - **Done when:** the public repo shows the first commit, and `go build ./...` runs.
 
-**T0.3 Go basics (by hand, no Claude Code)**
+**T0.3 Go basics (by hand, no Claude Code)** ✅ Done Oct 31: dockerver exercise written by hand outside the repo, explained
 1. Do the Tour of Go: basics, methods and interfaces, generics overview.
 2. Read "Effective Go" sections on errors, interfaces, and package names.
 3. Learn these, since the project uses them: modules and packages, structs and interfaces, error handling, `os/exec`, `encoding/json`, `context` (timeouts), `crypto/sha256`, `testing` with table-driven tests.
