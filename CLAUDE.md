@@ -14,7 +14,8 @@ Read `PLAN.md` before any work. Work only on the task ID named in the prompt.
 - Do not edit `tasks/*/check.sh`, `tasks/*/contract.json`, `tasks/split.json`, or any `*_test.go` file Tushar wrote, unless the prompt says so.
 - Do not write or edit `FRICTIONAL.md`.
 - Prefer the Go standard library. Ask before adding any dependency.
-- Sandbox access goes through `internal/sandbox`. Docker and kubectl are called through `os/exec`.
+- Approved dependency: `github.com/anthropics/anthropic-sdk-go`.
+- Sandbox access goes through `internal/sandbox`. kubectl (and docker for image builds) are called through `os/exec`.
 - In docs, past tense only for things that ran; label mock-ups and seeded runs; no invented results.
-- Commit messages start with the task ID, e.g. `T1.2: docker sandbox via os/exec`.
+- Commit messages start with the task ID, e.g. `T1.2: kind sandbox via os/exec`.
 - Explain non-obvious Go in short comments; Tushar is learning Go and must be able to explain every line.
