@@ -15,7 +15,7 @@ Build plan for Tushar Patel's INFO7375 final project. Every chat in this Project
 ## Current status
 
 - **Phase:** 1 — First slice
-- **Next task:** T1.4
+- **Next task:** T2.1
 - **Last updated:** Nov 12, 2026
 
 ---
@@ -117,7 +117,7 @@ Goal: one task, one kind pod, one trace file, one PASS/FAIL line.
 2. `cmd/apg/main.go`: `apg run 001 --no-agent` runs only the check.
 - **Done when:** it prints `001  FAIL  steps=0  reason=check_failed` and writes `traces/<run_id>.json`.
 
-**T1.4 Minimal agent loop (1b)**
+**T1.4 Minimal agent loop (1b)** ✅ Done Nov 12: `apg run 001` with `claude-haiku-5-5` printed `001  PASS  steps=3  reason=check_passed`; the agent read the repo and fixed `//` → `/` via `run_command`, then the hidden check passed (4 passed); 3,925 input / 437 output tokens, est. $0.000611 (evidence/traces/20261112T053055Z-92239eb0.json)
 1. `internal/loop/loop.go`: send the task, receive tool calls, execute them in the sandbox, send results back, max 10 steps.
 2. Tools for now: `read_file`, `write_file`, `run_command`.
 3. After the loop ends, the harness runs the check. The check decides PASS or FAIL.

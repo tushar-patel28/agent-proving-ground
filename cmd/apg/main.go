@@ -1,5 +1,6 @@
 // Command apg runs tasks in the sandbox and records a trace.
 //
+//	apg run 001               run the agent, then the hidden check (T1.4)
 //	apg run 001 --no-agent    run only the hidden check (T1.3)
 package main
 
@@ -19,12 +20,17 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tushar-patel28/agent-proving-ground/internal/loop"
 	"github.com/tushar-patel28/agent-proving-ground/internal/sandbox"
 	"github.com/tushar-patel28/agent-proving-ground/internal/trace"
 )
 
-const usage = `usage: apg run <task> --no-agent [--tasks dir] [--traces dir]
-  <task> is the task number, e.g. 001`
+// model is the agent's model for now; contracts do not choose it yet.
+const model = "claude-haiku-5-5"
+
+const usage = `usage: apg run <task> [--no-agent] [--tasks dir] [--traces dir]
+  <task> is the task number, e.g. 001
+  --no-agent runs only the hidden check`
 
 // Process exit codes.
 const (
@@ -48,10 +54,6 @@ func run(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "apg run: %v\n%s\n", err, usage)
 		return exitError
 	}
-	if !opts.noAgent {
-		fmt.Fprintln(stderr, "apg run: agent loop not built yet (T1.4); use --no-agent")
-		return exitError
-	}
 	tk, err := findTask(opts.tasksDir, opts.task)
 	if err != nil {
 		fmt.Fprintf(stderr, "apg run: %v\n", err)
@@ -62,7 +64,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	// pod still gets deleted (Stop uses its own context).
 	ctx, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stopSignals()
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
 
 	sb, err := sandbox.NewKind()
@@ -70,7 +72,11 @@ func run(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "apg run: %v\n", err)
 		return exitError
 	}
-	tr := runNoAgent(ctx, sb, sb.PodName(), tk)
+	var client loop.Client // nil means no agent
+	if !opts.noAgent {
+		client = loop.NewAnthropicClient()
+	}
+	tr := runTask(ctx, sb, sb.PodName(), tk, client)
 
 	path, err := trace.Write(opts.tracesDir, tr)
 	if err != nil {
@@ -137,13 +143,19 @@ type task struct {
 	Dir   string
 	Repo  string // copied into /workspace
 	Check string // hidden check, copied in only after setup
+
+	// From contract.json.
+	Goal         string
+	AllowedTools []string
+	MaxSteps     int
 }
 
 // A task number is exactly three digits, so it is safe inside a glob.
 var taskNumber = regexp.MustCompile(`^[0-9]{3}$`)
 
 // findTask finds the single directory tasksDir/<short>-* and checks that
-// it has repo/, check.sh, and a contract.json whose id matches the dir name.
+// it has repo/, check.sh, and a contract.json whose id matches the dir name
+// and that has a goal, tools, and a positive step budget.
 func findTask(tasksDir, short string) (task, error) {
 	if !taskNumber.MatchString(short) {
 		return task{}, fmt.Errorf("task %q: want a three-digit number like 001", short)
@@ -173,22 +185,33 @@ func findTask(tasksDir, short string) (task, error) {
 		return task{}, fmt.Errorf("task %s: %w", tk.ID, err)
 	}
 	var contract struct {
-		ID string `json:"id"`
+		ID           string   `json:"id"`
+		Goal         string   `json:"goal"`
+		AllowedTools []string `json:"allowed_tools"`
+		MaxSteps     int      `json:"max_steps"`
 	}
 	if err := json.Unmarshal(b, &contract); err != nil {
 		return task{}, fmt.Errorf("task %s: contract.json: %w", tk.ID, err)
 	}
-	if contract.ID != tk.ID {
+	switch {
+	case contract.ID != tk.ID:
 		return task{}, fmt.Errorf("task %s: contract id %q does not match directory", tk.ID, contract.ID)
+	case strings.TrimSpace(contract.Goal) == "":
+		return task{}, fmt.Errorf("task %s: contract has no goal", tk.ID)
+	case len(contract.AllowedTools) == 0:
+		return task{}, fmt.Errorf("task %s: contract allows no tools", tk.ID)
+	case contract.MaxSteps <= 0:
+		return task{}, fmt.Errorf("task %s: max_steps must be positive", tk.ID)
 	}
+	tk.Goal, tk.AllowedTools, tk.MaxSteps = contract.Goal, contract.AllowedTools, contract.MaxSteps
 	return tk, nil
 }
 
-// runNoAgent starts the sandbox, copies the repo in, then copies in and
-// runs the check, and always stops the sandbox. Every host command goes
-// into the trace. It never returns an error: failures become
-// exit_reason "error" in the trace.
-func runNoAgent(ctx context.Context, sb sandbox.Sandbox, pod string, tk task) *trace.Trace {
+// runTask starts the sandbox, copies the repo in, runs the agent (unless
+// client is nil), then copies in and runs the check, and always stops the
+// sandbox. Every host command goes into the trace. It never returns an
+// error: failures become exit_reason "error" in the trace.
+func runTask(ctx context.Context, sb sandbox.Sandbox, pod string, tk task, client loop.Client) *trace.Trace {
 	start := time.Now().UTC()
 	tr := &trace.Trace{
 		SchemaVersion: trace.SchemaVersion,
@@ -205,7 +228,29 @@ func runNoAgent(ctx context.Context, sb sandbox.Sandbox, pod string, tk task) *t
 		}
 	}
 
-	checkExit, err := setupAndCheck(ctx, sb, tk, rec)
+	// agent runs between setup and the check. It is a closure so it can
+	// fill in tr; with no client it does nothing.
+	agent := func() error {
+		if client == nil {
+			return nil
+		}
+		cfg := loop.Config{
+			Model:     model,
+			Goal:      tk.Goal,
+			Tools:     tk.AllowedTools,
+			MaxSteps:  tk.MaxSteps,
+			MaxTokens: 16000,
+		}
+		res, err := loop.Run(ctx, client, sb, cfg, func(r sandbox.Result) { rec(trace.PhaseAgent, r) })
+		tr.Model, tr.Steps, tr.LoopStop = model, res.Steps, res.Stop
+		tr.TotalInputTokens, tr.TotalOutputTokens, tr.EstimatedCostUSD = res.InputTokens, res.OutputTokens, res.CostUSD
+		if err != nil {
+			return fmt.Errorf("agent: %w", err)
+		}
+		return nil
+	}
+
+	checkExit, err := setupAndCheck(ctx, sb, tk, rec, agent)
 
 	// Stop always runs, with a fresh context: ctx may have timed out or been
 	// cancelled by Ctrl-C. A failed Stop is recorded but does not change the
@@ -232,7 +277,7 @@ func runNoAgent(ctx context.Context, sb sandbox.Sandbox, pod string, tk task) *t
 
 // setupAndCheck returns the check's exit code, or an error if the harness
 // itself failed (so a broken run is never reported as check_failed).
-func setupAndCheck(ctx context.Context, sb sandbox.Sandbox, tk task, rec func(string, ...sandbox.Result)) (int, error) {
+func setupAndCheck(ctx context.Context, sb sandbox.Sandbox, tk task, rec func(string, ...sandbox.Result), agent func() error) (int, error) {
 	rs, err := sb.Start(ctx)
 	rec(trace.PhaseStart, rs...)
 	if err != nil {
@@ -253,10 +298,16 @@ func setupAndCheck(ctx context.Context, sb sandbox.Sandbox, tk task, rec func(st
 		return 0, fmt.Errorf("workspace empty after copy (exit %d, err %v)", r.ExitCode, err)
 	}
 
-	// Check: copied in only now, after setup (and, from T1.4, after the
-	// agent), into a directory with a random name so nothing can be planted
-	// there in advance. Known gap: a process the agent left running could
-	// still find and change it before it runs (T2.x).
+	// Agent. An agent failure (API or sandbox error) ends the run as
+	// "error" without running the check.
+	if err := agent(); err != nil {
+		return 0, err
+	}
+
+	// Check: copied in only now, after setup and the agent, into a
+	// directory with a random name so nothing can be planted there in
+	// advance. Known gap: a process the agent left running could still find
+	// and change it before it runs (T2.x).
 	b := make([]byte, 8)
 	if _, err := rand.Read(b); err != nil {
 		return 0, err

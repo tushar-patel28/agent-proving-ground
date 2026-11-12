@@ -45,7 +45,7 @@ func makeTask(t *testing.T, tasksDir, id, contractID string) {
 	}
 	files := map[string]string{
 		"check.sh":      "exit 0\n",
-		"contract.json": `{"id": "` + contractID + `"}`,
+		"contract.json": `{"id": "` + contractID + `", "goal": "g", "allowed_tools": ["read_file"], "max_steps": 3}`,
 	}
 	for name, body := range files {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
@@ -78,8 +78,32 @@ func TestFindTask(t *testing.T) {
 
 func TestRealTask001(t *testing.T) {
 	// The real task directory in this repo must pass findTask.
-	if _, err := findTask(filepath.Join("..", "..", "tasks"), "001"); err != nil {
-		t.Error(err)
+	tk, err := findTask(filepath.Join("..", "..", "tasks"), "001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tk.MaxSteps != 10 || len(tk.AllowedTools) != 3 || tk.Goal == "" {
+		t.Errorf("contract not loaded: %+v", tk)
+	}
+}
+
+func TestFindTaskRejectsIncompleteContracts(t *testing.T) {
+	bad := map[string]string{
+		"no goal":    `{"id": "001-x", "allowed_tools": ["read_file"], "max_steps": 3}`,
+		"no tools":   `{"id": "001-x", "goal": "g", "max_steps": 3}`,
+		"zero steps": `{"id": "001-x", "goal": "g", "allowed_tools": ["read_file"], "max_steps": 0}`,
+	}
+	for name, contract := range bad {
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			makeTask(t, root, "001-x", "001-x")
+			if err := os.WriteFile(filepath.Join(root, "001-x", "contract.json"), []byte(contract), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := findTask(root, "001"); err == nil {
+				t.Error("incomplete contract should be rejected")
+			}
+		})
 	}
 }
 

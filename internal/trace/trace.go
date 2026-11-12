@@ -67,24 +67,44 @@ type Trace struct {
 	ExitReason    string    `json:"exit_reason"`
 	Verdict       string    `json:"verdict"`
 	Error         string    `json:"error,omitempty"` // harness error; omitempty drops it when ""
+
+	// Agent fields. omitempty leaves them out of --no-agent traces.
+	Model             string  `json:"model,omitempty"`
+	LoopStop          string  `json:"loop_stop,omitempty"` // why the agent loop ended: end_turn | max_steps | max_tokens | refusal
+	TotalInputTokens  int64   `json:"total_input_tokens,omitempty"`
+	TotalOutputTokens int64   `json:"total_output_tokens,omitempty"`
+	EstimatedCostUSD  float64 `json:"estimated_cost_usd,omitempty"` // from list prices; not a bill
 }
 
 // Command is one host command the sandbox ran, tagged with the run phase.
 type Command struct {
-	Phase string `json:"phase"` // start | setup | check | stop
+	Phase string `json:"phase"` // start | setup | agent | check | stop
 
 	// Embedded struct (a type with no field name): its fields (args,
 	// stdout, stderr, exit_code) appear directly in this JSON object.
 	sandbox.Result
 }
 
-// Step is one agent step. Empty until the agent loop exists (T1.4).
-type Step struct{}
+// Step is one agent step: one model turn and the (at most one) tool call
+// it made.
+type Step struct {
+	N            int    `json:"n"` // 1-based
+	StopReason   string `json:"stop_reason"`
+	Text         string `json:"text,omitempty"`      // the model's text in this turn, truncated
+	Tool         string `json:"tool,omitempty"`      // empty when the turn made no tool call
+	Input        string `json:"input,omitempty"`     // tool input as raw JSON text, truncated
+	Output       string `json:"output,omitempty"`    // tool result sent back to the model, truncated
+	ExitCode     *int   `json:"exit_code,omitempty"` // pointer: nil (omitted) when nothing ran in the sandbox
+	IsError      bool   `json:"is_error,omitempty"`
+	InputTokens  int64  `json:"input_tokens"`
+	OutputTokens int64  `json:"output_tokens"` // includes thinking tokens
+}
 
 // Phases of a run, used in Command.Phase.
 const (
 	PhaseStart = "start"
 	PhaseSetup = "setup"
+	PhaseAgent = "agent" // commands run by the agent's tool calls
 	PhaseCheck = "check"
 	PhaseStop  = "stop"
 )

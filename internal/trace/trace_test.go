@@ -148,3 +148,44 @@ func TestNewRunID(t *testing.T) {
 		t.Errorf("%q does not match the run ID pattern", got)
 	}
 }
+
+func TestAgentFieldsOmittedWithoutAgent(t *testing.T) {
+	path, err := Write(t.TempDir(), good())
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(path)
+	for _, key := range []string{`"model"`, `"loop_stop"`, `"total_input_tokens"`, `"estimated_cost_usd"`} {
+		if strings.Contains(string(b), key) {
+			t.Errorf("no-agent trace should not contain %s", key)
+		}
+	}
+}
+
+func TestStepRoundTrip(t *testing.T) {
+	code := 1
+	tr := good()
+	tr.Model, tr.LoopStop = "claude-haiku-5-5", "end_turn"
+	tr.TotalInputTokens, tr.TotalOutputTokens, tr.EstimatedCostUSD = 300, 40, 0.00005
+	tr.Steps = []Step{
+		{N: 1, StopReason: "tool_use", Tool: "run_command", Input: `{"command":"pytest -q"}`,
+			Output: "exit_code: 1", ExitCode: &code, InputTokens: 100, OutputTokens: 20},
+		{N: 2, StopReason: "end_turn", Text: "Done.", InputTokens: 200, OutputTokens: 20},
+	}
+	path, err := Write(t.TempDir(), tr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(path)
+	var got Trace
+	if err := json.Unmarshal(b, &got); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(&got, tr) {
+		t.Errorf("round trip mismatch:\n got %+v\nwant %+v", got, *tr)
+	}
+	// Step 2 ran nothing in the sandbox, so it has no exit_code at all.
+	if strings.Count(string(b), `"exit_code"`) != 2 { // one in commands, one in step 1
+		t.Errorf("want exit_code only on the command and step 1:\n%s", b)
+	}
+}
