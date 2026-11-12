@@ -319,3 +319,4 @@ Goal: one task, one kind pod, one trace file, one PASS/FAIL line.
 |---|---|---|---|
 | — | Oct 22 | Pitch film resubmitted with the Go stack; graded 50/50 | course repo commit e9bef08 |
 | M0 | Nov 3 | Toolchain works, public repo exists, premortem committed; synced to the course folder | course repo commit 73af1fc (from agent-proving-ground@2a1a722) |
+| M1 | Nov 12 | First slice works end to end on kind (T1.1–T1.4: `apg run 001` PASS with claude-haiku-5-5, evidence/traces/20261112T053055Z-92239eb0.json); synced to the course folder | course repo commit 8349ba9a (from agent-proving-ground@e3454c0) |
