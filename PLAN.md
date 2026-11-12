@@ -15,7 +15,7 @@ Build plan for Tushar Patel's INFO7375 final project. Every chat in this Project
 ## Current status
 
 - **Phase:** 1 — First slice
-- **Next task:** T1.2
+- **Next task:** T1.3
 - **Last updated:** Nov 11, 2026
 
 ---
@@ -102,7 +102,7 @@ Goal: one task, one kind pod, one trace file, one PASS/FAIL line.
 4. `sandbox/Dockerfile`: `python:3.12-slim` with pytest preinstalled. Build it with `docker build` as `apg-sandbox:dev`, then `kind load docker-image apg-sandbox:dev`.
 - **Done when:** running `check.sh` in a pod by hand fails on the untouched repo.
 
-**T1.2 Sandbox interface and kind implementation**
+**T1.2 Sandbox interface and kind implementation** ✅ Done Nov 11: Go test started a pod, ran `echo hi`, copied a file in and out, and deleted it; with the deny-all-egress policy, TCP to 1.1.1.1:443 and DNS failed while a control pod without the policy connected. kindnet enforces NetworkPolicy (no Calico), but only ~1–2s after the pod is Ready, so `Start` waits until an egress probe is blocked; egress block confirmed by probe before agent runs (D19)
 1. `internal/sandbox/sandbox.go`: interface `Sandbox` with `Start`, `Exec`, `CopyIn`, `CopyOut`, `Stop`.
 2. `internal/sandbox/kind.go`: uses `kubectl` through `os/exec`. One pod per run.
 3. Pod settings: non-root, drop all capabilities, no service-account token (`automountServiceAccountToken: false`), CPU and memory limits, default-deny egress NetworkPolicy.
@@ -301,6 +301,7 @@ Goal: one task, one kind pod, one trace file, one PASS/FAIL line.
 | D16 | Nov 3 | Kubernetes (kind) from the start; Docker sandbox only as fallback after Nov 12 | Decided |
 | D17 | Nov 3 | Claude Code drafts packet docs; Tushar reviews | Decided |
 | D18 | Nov 11 | Claude Code implements everything; Tushar reviews and approves | Decided |
+| D19 | Nov 11 | kindnet enforces NetworkPolicy ~1–2 s after Ready; Start probes until egress is blocked (30 s limit, fail and delete pod), probes recorded with Start's commands | Decided |
 
 ---
 

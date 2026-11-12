@@ -23,7 +23,6 @@ Date: Nov 3, 2026
 | pytest | Task checks inside the sandbox | MIT (GitHub license API for `pytest-dev/pytest`, checked Nov 3, 2026) |
 | `github.com/anthropics/anthropic-sdk-go` | Claude API calls from the agent loop (D2; approved dependency in CLAUDE.md) | Apache-2.0 (GitHub license API, checked Nov 3, 2026) |
 | Claude models via the Anthropic API | The agent the harness will run; model not chosen yet | Anthropic commercial terms |
-| Calico (only if kindnet does not enforce NetworkPolicy) | Enforcing default-deny egress (T1.2) | Apache-2.0 (GitHub license API for `projectcalico/calico`, checked Nov 3, 2026) |
 
 ## What Tushar wrote or did
 
