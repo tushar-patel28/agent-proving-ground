@@ -15,7 +15,7 @@ Build plan for Tushar Patel's INFO7375 final project. Every chat in this Project
 ## Current status
 
 - **Phase:** 1 — First slice
-- **Next task:** T1.1
+- **Next task:** T1.2
 - **Last updated:** Nov 11, 2026
 
 ---
@@ -95,7 +95,7 @@ In FRICTIONAL.md, link to personal-repo commits by full URL so a grader can open
 
 Goal: one task, one kind pod, one trace file, one PASS/FAIL line.
 
-**T1.1 Task 001 and the sandbox image**
+**T1.1 Task 001 and the sandbox image** ✅ Done Nov 11: apg-sandbox:dev built (pytest 9.2.0, uid 1000) and kind-loaded; in a locked-down kind pod, check.sh failed on the untouched repo (1 failed, 3 passed), passed with the bug fixed, and failed on the hash when only the test file was edited
 1. `tasks/001-fix-function/repo/`: a tiny Python package with one bug and one pytest file.
 2. `tasks/001-fix-function/contract.json`: goal, allowed tools, step budget, required output.
 3. `tasks/001-fix-function/check.sh`: runs pytest, and also checks that the test file was not changed.
