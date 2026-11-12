@@ -14,15 +14,15 @@ Build plan for Tushar Patel's INFO7375 final project. Every chat in this Project
 
 ## Current status
 
-- **Phase:** 0 — Setup and Go basics
-- **Next task:** T0.5
-- **Last updated:** Nov 3, 2026
+- **Phase:** 1 — First slice
+- **Next task:** T1.1
+- **Last updated:** Nov 11, 2026
 
 ---
 
 ## How every task runs (the working loop)
 
-1. **Tushar writes first:** the contract, the tests, or the spec for the task (where the task says so). Commit it before Claude Code touches code. This is the "gate" evidence the course asks for.
+1. Claude Code writes the task contract, checks, and tests; Tushar reviews and approves.
 2. **Plan in Claude Code:** start `claude` in the repo, switch to plan mode, give it the task ID (for example "Do T1.2 from PLAN.md"). Review the plan before it edits.
 3. **Claude Code implements.** Keep permission prompts on for commands and edits.
 4. **Tushar reviews:** read the diff, run `go vet ./...` and `go test ./...`, and run the task's "Done when" check by hand.
@@ -40,7 +40,7 @@ The personal repo is where the work happens, at your own pace. The course folder
 
 In FRICTIONAL.md, link to personal-repo commits by full URL so a grader can open them.
 
-**Driver's seat (what stays Tushar's):** task contracts and checks, the permission policy rules and their tests, the stop and gate contracts and their tests, the premortem choice, the dev/held-out split, FRICTIONAL.md, and sign-off. Packet docs are drafted by Claude Code and reviewed by Tushar (D17). Claude Code does plumbing, refactors, and boilerplate, and Tushar must be able to explain every line it writes.
+**Driver's seat:** Claude Code implements everything; Tushar reviews and approves everything. FRICTIONAL.md stays in Tushar's own words.
 
 ---
 
@@ -80,7 +80,7 @@ In FRICTIONAL.md, link to personal-repo commits by full URL so a grader can open
 4. Start `FRICTIONAL.md` (your words, dated entries) and `SOURCES.md` (list Claude Code, the Claude models, the Go SDK).
 - **Done when:** the three docs are committed with today's dates.
 
-**T0.5 kind basics (by hand)**
+**T0.5 kind basics (by hand)** ✅ Done Nov 11: kind cluster from config, kubectl run/exec/cp, locked-down pod spec, deny-egress NetworkPolicy enforced
 1. Install kind and kubectl. Check: `kind version`, `kubectl version --client`.
 2. Create a cluster from a kind config file.
 3. Run a pod, `kubectl exec` and `kubectl cp` into it, delete it.
@@ -95,7 +95,7 @@ In FRICTIONAL.md, link to personal-repo commits by full URL so a grader can open
 
 Goal: one task, one kind pod, one trace file, one PASS/FAIL line.
 
-**T1.1 Task 001 and the sandbox image (Tushar writes)**
+**T1.1 Task 001 and the sandbox image**
 1. `tasks/001-fix-function/repo/`: a tiny Python package with one bug and one pytest file.
 2. `tasks/001-fix-function/contract.json`: goal, allowed tools, step budget, required output.
 3. `tasks/001-fix-function/check.sh`: runs pytest, and also checks that the test file was not changed.
@@ -130,7 +130,7 @@ Goal: one task, one kind pod, one trace file, one PASS/FAIL line.
 
 ## Phase 2 — The full agentic loop (Nov 13 – Nov 19)
 
-**T2.1 Permission policy (Tushar writes the tests first)**
+**T2.1 Permission policy**
 1. `internal/policy/policy_test.go` first: paths outside `/workspace` denied, commands not on the allowlist denied, tools not in the contract denied, check files not writable.
 2. `internal/policy/policy.go`: every tool call goes through `policy.Check` before it runs. Denied calls are recorded in the trace and never executed.
 - **Done when:** all policy tests pass, and a trace shows a denied call.
@@ -140,12 +140,12 @@ Goal: one task, one kind pod, one trace file, one PASS/FAIL line.
 2. Exit reasons as a fixed list: `check_passed`, `check_failed`, `budget_steps`, `budget_tokens`, `budget_cost`, `timeout`, `policy_violation_limit`, `gate_refused`, `gate_deferred`, `error`.
 - **Done when:** a test forces each budget exit.
 
-**T2.3 Stop condition (Tushar writes the tests first)**
+**T2.3 Stop condition**
 1. `internal/stop/stop.go`: after each write action, the harness runs the hidden check. PASS stops the run.
 2. If the agent says it is done, that only triggers the check. The model's word is never the verdict.
 - **Done when:** a test shows that an agent saying "done" with a failing check does not produce PASS.
 
-**T2.4 Human gate (Tushar writes the tests first)**
+**T2.4 Human gate**
 1. `internal/gate/gate.go`: before any change leaves the sandbox, show the diff and the check output, then ask approve / refuse / defer.
 2. Record the SHA-256 of the exact diff shown. If the diff changes, the approval is void.
 3. In batch mode (`apg eval`), the gate always defers. Nothing is exported unattended.
@@ -153,7 +153,7 @@ Goal: one task, one kind pod, one trace file, one PASS/FAIL line.
 
 **T2.5 Trace schema v1 and 5 tasks**
 1. `docs/trace-schema.md`: every field explained.
-2. Add tasks 002–005 (Tushar writes each contract and check).
+2. Add tasks 002–005.
 - **Done when:** all 5 tasks run, and each trace validates against the schema.
 
 **Milestone M2:** loop, tools, policy, state, stop, and gate all exist and have tests.
@@ -300,6 +300,7 @@ Goal: one task, one kind pod, one trace file, one PASS/FAIL line.
 | D15 | Nov 3 | Add apg compare, denied column, apg show, FAILURES.md, demo.sh | Decided |
 | D16 | Nov 3 | Kubernetes (kind) from the start; Docker sandbox only as fallback after Nov 12 | Decided |
 | D17 | Nov 3 | Claude Code drafts packet docs; Tushar reviews | Decided |
+| D18 | Nov 11 | Claude Code implements everything; Tushar reviews and approves | Decided |
 
 ---
 
