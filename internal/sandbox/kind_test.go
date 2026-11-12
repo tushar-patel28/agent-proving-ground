@@ -183,6 +183,23 @@ func TestKindLifecycle(t *testing.T) {
 		t.Errorf("cat after CopyIn: stdout=%q err=%v", r.Stdout, err)
 	}
 
+	// CopyIn a directory with a trailing "/.": its contents land directly
+	// in /workspace (without "/." kubectl cp would create /workspace/<name>).
+	src := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(src, "a"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(src, "a", "b.txt"), []byte("nested\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if r, err := k.CopyIn(ctx, src+string(filepath.Separator)+".", "/workspace"); err != nil {
+		t.Fatalf("copy in dir: %v (%+v)", err, r)
+	}
+	r, err = k.Exec(ctx, "cat", "/workspace/a/b.txt")
+	if err != nil || r.Stdout != "nested\n" {
+		t.Errorf("dir CopyIn: cat /workspace/a/b.txt stdout=%q stderr=%q err=%v", r.Stdout, r.Stderr, err)
+	}
+
 	// CopyOut a file the pod wrote, and compare on the host.
 	if r, err := k.Exec(ctx, "sh", "-c", "echo made in the pod > /workspace/out.txt"); err != nil || r.ExitCode != 0 {
 		t.Fatalf("write out.txt: %v (%+v)", err, r)

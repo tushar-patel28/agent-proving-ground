@@ -15,8 +15,8 @@ Build plan for Tushar Patel's INFO7375 final project. Every chat in this Project
 ## Current status
 
 - **Phase:** 1 — First slice
-- **Next task:** T1.3
-- **Last updated:** Nov 11, 2026
+- **Next task:** T1.4
+- **Last updated:** Nov 12, 2026
 
 ---
 
@@ -28,6 +28,8 @@ Build plan for Tushar Patel's INFO7375 final project. Every chat in this Project
 4. **Tushar reviews:** read the diff, run `go vet ./...` and `go test ./...`, and run the task's "Done when" check by hand.
 5. **Commit** with the task ID in the message: `T1.2: kind sandbox via os/exec`.
 6. **Log:** tell the claude.ai Project chat what went wrong or what you rejected (it keeps the friction log). Tushar writes FRICTIONAL.md at the end. Tick the task here, in the same commit.
+
+Traces cited in PLAN.md or docs are copied to evidence/traces/ and committed; traces/ stays ignored.
 
 ## Course repo sync (at every milestone)
 
@@ -110,7 +112,7 @@ Goal: one task, one kind pod, one trace file, one PASS/FAIL line.
 5. A test pod tries to reach the internet and must fail. If kindnet does not enforce the NetworkPolicy, install Calico and document it.
 - **Done when:** a Go test starts a pod, runs `echo hi`, and deletes it, and the egress test pod fails to connect.
 
-**T1.3 First run without an agent (1a)**
+**T1.3 First run without an agent (1a)** ✅ Done Nov 12: `apg run 001 --no-agent` printed `001  FAIL  steps=0  reason=check_failed  trace=traces/20261112T050512Z-3ddbacf5.json` and wrote the trace (11 host commands: start incl. egress probes, setup, check, stop; evidence/traces/20261112T050512Z-3ddbacf5.json); a bug-fixed copy (under the ignored traces/fixed-001/) gave `PASS reason=check_passed` (evidence/traces/20261112T050920Z-5dd372ce.json)
 1. `internal/trace/trace.go`: trace schema v0 (run ID, task, steps, commands, exit reason, verdict).
 2. `cmd/apg/main.go`: `apg run 001 --no-agent` runs only the check.
 - **Done when:** it prints `001  FAIL  steps=0  reason=check_failed` and writes `traces/<run_id>.json`.
@@ -122,7 +124,7 @@ Goal: one task, one kind pod, one trace file, one PASS/FAIL line.
 - 🔎 **Research:** Claude tool use (how tool_use and tool_result messages work), the Go SDK tool-use example.
 - **Done when:** `apg run 001` prints PASS or FAIL, and the trace lists every step.
 
-**Fallback (Thu Nov 12):** if task 001 cannot run on kind by Thu Nov 12, Claude Code writes `internal/sandbox/docker.go`. Log why (friction log in the claude.ai Project, then FRICTIONAL.md at the end) and the Decision log.
+**Fallback (Thu Nov 12):** if task 001 cannot run on kind by Thu Nov 12, Claude Code writes `internal/sandbox/docker.go`. Log why (friction log in the claude.ai Project, then FRICTIONAL.md at the end) and the Decision log. Not triggered: task 001 ran on kind on Nov 12 (T1.3).
 
 **Milestone M1:** first slice works end to end on kind.
 

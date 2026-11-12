@@ -161,7 +161,8 @@ func (k *Kind) Exec(ctx context.Context, cmd ...string) (Result, error) {
 }
 
 // CopyIn copies a host file or directory into the pod with kubectl cp
-// (which uses tar inside the pod).
+// (which uses tar inside the pod). Like cp -r, copying dir to an existing
+// directory creates dir inside it; pass "dir/." to copy only its contents.
 func (k *Kind) CopyIn(ctx context.Context, hostPath, sandboxPath string) (Result, error) {
 	r, err := k.run(ctx, nil, "cp", hostPath, k.pod+":"+sandboxPath)
 	return r, check(r, err)
