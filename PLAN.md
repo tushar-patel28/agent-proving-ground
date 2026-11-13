@@ -167,9 +167,13 @@ Goal: one task, one kind pod, one trace file, one PASS/FAIL line.
 - **Tests first:** `internal/gate/gate_test.go` and `cmd/apg/gate_test.go` were committed before `internal/gate` (commit 38c30d2).
 - **The gate:** after the verdict, with the pod alive, it kills leftover processes, copies /workspace out, and diffs it against the task repo, leaving out `__pycache__` and `.pytest_cache`. It shows the approver the diff, the check result and exit code, the exit reason, and the hash prefix, then asks approve / refuse / defer. It binds the decision to the SHA-256 of the bytes shown and rebuilds the diff before export (a mismatch is void). Without a terminal on stdin it defers.
 - **T2.3 follow-up:** each check run deletes `__pycache__` after the kill, and the fingerprint ignores the caches.
-- **Real runs** with `claude-haiku-5-5` (gate answered by Claude Code through a pty on Tushar's instruction):
-  - `001  PASS  steps=4  reason=check_passed  gate=approved` (evidence/traces/20261113T222626Z-2f2b40ec.json). The rebuild hash matched; the patch is in evidence/patches/20261113T222626Z-2f2b40ec.approved.patch, and `git apply --check` passed on a copy of the task repo.
-  - `gate=refused` (evidence/traces/20261113T222801Z-3922d73c.json): nothing written.
+- **Human-answered by Tushar in a real terminal** (`claude-haiku-5-5`):
+  - `001  PASS  steps=4  reason=check_passed  gate=approved` (evidence/traces/20261113T224740Z-a9a2c258.json). The patch's SHA-256 equals `diff_sha256` = `recheck_sha256` (evidence/patches/20261113T224740Z-a9a2c258.approved.patch).
+  - `gate=refused`, PASS `check_passed` in 5 steps (evidence/traces/20261113T224827Z-cd9126a5.json). Its out/ dir was never created, so nothing was written.
+- **Scripted answer via pseudo-terminal, not a human** (Claude Code piped the answer into `script`):
+  - approve (evidence/traces/20261113T222626Z-2f2b40ec.json; patch in evidence/patches/20261113T222626Z-2f2b40ec.approved.patch; `git apply --check` passed on a copy of the task repo)
+  - refuse (evidence/traces/20261113T222801Z-3922d73c.json)
+- **Known limit** (docs/03): the gate trusts whoever types at the terminal, and a pty can answer it.
 1. `internal/gate/gate.go`: before any change leaves the sandbox, show the diff and the check output, then ask approve / refuse / defer.
 2. Record the SHA-256 of the exact diff shown. If the diff changes, the approval is void.
 3. In batch mode (`apg eval`), the gate always defers. Nothing is exported unattended.

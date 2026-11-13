@@ -79,9 +79,22 @@ The agent's changes leave the sandbox only through the human gate (`internal/gat
    - **stdin not a terminal:** always defers, so nothing is exported unattended
 5. The gate's outcome is in the trace's `gate` section. `exit_reason` stays the loop's (D23).
 
-Two real runs on Nov 13, 2026: the gate was answered by Claude Code through a pseudo-terminal (`script`), on Tushar's instruction. Tushar did not read these diffs before the answer.
-- **Approve:** `evidence/traces/20261113T222626Z-2f2b40ec.json`. The rebuilt diff's hash matched, and the patch is in `evidence/patches/`.
+Real runs of task 001 with `claude-haiku-5-5`, Nov 13, 2026:
+
+**Human-answered by Tushar in a real terminal** (`./bin/apg run 001`; he read the diff, then answered):
+- **Approve:** `evidence/traces/20261113T224740Z-a9a2c258.json`, `001  PASS  steps=4  reason=check_passed  gate=approved`.
+  - `diff_sha256` and `recheck_sha256` were both `cbdbe61d2d21…ae9850`.
+  - The exported patch, `evidence/patches/20261113T224740Z-a9a2c258.approved.patch`, has the same SHA-256.
+  - `out/20261113T224740Z-a9a2c258/` held only `approved.patch`.
+- **Refuse:** `evidence/traces/20261113T224827Z-cd9126a5.json`, PASS `check_passed` in 5 steps, `gate=refused`.
+  - The same `diff_sha256` as the approved run; no rebuild and no `exported_path`.
+  - `out/20261113T224827Z-cd9126a5/` was never created, so nothing was written.
+
+**Scripted answer via pseudo-terminal, not a human** (the build agent, Claude Code, piped `approve` / `refuse` into `script`, which gave apg a pty; Tushar did not read these diffs):
+- **Approve:** `evidence/traces/20261113T222626Z-2f2b40ec.json`, with the patch in `evidence/patches/20261113T222626Z-2f2b40ec.approved.patch`.
 - **Refuse:** `evidence/traces/20261113T222801Z-3922d73c.json`. Nothing was written.
+
+**The gate trusts whoever types at the terminal.** It checks only that stdin is a terminal, not who is behind it. A pseudo-terminal counts as a terminal, so a program can answer the gate: the build agent did exactly that in the two scripted runs above. What keeps the agent under test away from it is that the agent has no tool that reaches the gate. Anyone, or any program, with access to the operator's terminal can still answer it, and the trace cannot tell a scripted answer from a human one: both record `interactive: true`.
 
 Not checked:
 - Symlinks and file modes travel as notes or not at all: a symlink becomes one `Symlink …` line, and the executable bit is not in the patch.
