@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/tushar-patel28/agent-proving-ground/internal/budget"
 	"github.com/tushar-patel28/agent-proving-ground/internal/sandbox"
+	"github.com/tushar-patel28/agent-proving-ground/internal/stop"
 	"github.com/tushar-patel28/agent-proving-ground/internal/trace"
 )
 
@@ -99,6 +101,8 @@ func (s *exitSandbox) Exec(ctx context.Context, cmd ...string) (sandbox.Result, 
 		r.Stdout = "calc\n"
 	case cmd[0] == "realpath":
 		r.Stdout = strings.Join(cmd[3:], "\n") + "\n"
+	case slices.Equal(cmd, stop.KillCmd): // before each check: nothing to kill here
+		r.Stdout = `{"killed": [], "left": 0}` + "\n"
 	case cmd[0] == "bash": // the check
 		s.checkRan = true
 		r.ExitCode = s.checkExit
@@ -150,16 +154,16 @@ func TestEachExitReason(t *testing.T) {
 			client:     &exitClient{replies: []reply{ls}, counts: []int64{100}},
 			wantReason: trace.ReasonBudgetSteps, wantVerdict: "PASS", wantCheck: true, wantNewCalls: 2},
 
-		// Step 1 uses 85,000 + 1,000 tokens. Before step 2, 86,000 + 1,000
-		// counted + 16,000 worst-case reply > 100,000: step 2 never starts.
+		// Step 1 uses 95,000 + 1,000 tokens. Before step 2, 96,000 + 1,000
+		// counted + 4,096 worst-case reply > 100,000: step 2 never starts.
 		{name: "budget_tokens", limits: func(l *budget.Limits) { l.MaxTotalTokens = 100_000 },
-			client:     &exitClient{replies: []reply{{tool: "run_command", input: `{"argv":["ls"]}`, in: 85_000, out: 1_000}}, counts: []int64{1_000}},
+			client:     &exitClient{replies: []reply{{tool: "run_command", input: `{"argv":["ls"]}`, in: 95_000, out: 1_000}}, counts: []int64{1_000}},
 			checkExit:  1,
 			wantReason: trace.ReasonBudgetTokens, wantVerdict: "FAIL", wantCheck: true, wantNewCalls: 1},
 
-		// The worst case of the first call is 1,000 in ($0.0001) + 16,000 out
-		// ($0.008) = $0.0081 > $0.005: no model call starts at all.
-		{name: "budget_cost", limits: func(l *budget.Limits) { l.MaxCostUSD = 0.005 },
+		// The worst case of the first call is 1,000 in ($0.0001) + 4,096 out
+		// ($0.002048) = $0.002148 > $0.002: no model call starts at all.
+		{name: "budget_cost", limits: func(l *budget.Limits) { l.MaxCostUSD = 0.002 },
 			client:    &exitClient{replies: []reply{done}, counts: []int64{1_000}},
 			checkExit: 1, wantReason: trace.ReasonBudgetCost, wantVerdict: "FAIL", wantCheck: true, wantNewCalls: 0},
 

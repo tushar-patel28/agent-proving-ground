@@ -48,6 +48,8 @@ func TestBefore(t *testing.T) {
 func TestFits(t *testing.T) {
 	// Haiku: $0.10 in, $0.50 out per million. A 16,000-token reply costs at
 	// most $0.008, so with $0.01 the cost limit bites before 50K tokens.
+	// (The harness's reply cap is 4,096 since T2.3; these cases pass the
+	// reply size explicitly, so they test the arithmetic, not the cap.)
 	tests := []struct {
 		name            string
 		used            Used
