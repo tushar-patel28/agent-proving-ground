@@ -29,6 +29,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/tushar-patel28/agent-proving-ground/internal/trace"
 )
@@ -105,6 +106,10 @@ func Run(ctx context.Context, cfg Config, runID string, sum Summary, build Build
 
 	show(cfg.Out, runID, diff, g.DiffSHA256, sum)
 	g.Shown = Shown
+	if len(warnings(diff)) > 0 {
+		// A copy, so the package-level Shown slice is never changed.
+		g.Shown = append(append([]string(nil), Shown...), "warnings")
+	}
 	switch ask(cfg.In, cfg.Out) {
 	case DecisionRefused:
 		return done(DecisionRefused, "")
@@ -144,6 +149,9 @@ func show(w io.Writer, runID string, diff []byte, hash string, s Summary) {
 	fmt.Fprintf(w, "==== apg gate, run %s: diff of /workspace against the task repo ====\n", runID)
 	w.Write(diff) // the exact bytes that are hashed and would be exported
 	fmt.Fprintln(w, "==== end of diff ====")
+	for _, line := range warnings(diff) {
+		fmt.Fprintln(w, line)
+	}
 	switch {
 	case s.CheckRan && s.CheckExit != nil:
 		result := "failed"
@@ -157,6 +165,18 @@ func show(w io.Writer, runID string, diff []byte, hash string, s Summary) {
 	fmt.Fprintf(w, "verdict:     %s\n", s.Verdict)
 	fmt.Fprintf(w, "exit reason: %s\n", s.ExitReason)
 	fmt.Fprintf(w, "diff sha256: %s (full hash in the trace)\n", hash[:12])
+}
+
+// warnings returns the diff's WARNING lines, which show repeats after the
+// diff so they are not lost in a long one.
+func warnings(diff []byte) []string {
+	var out []string
+	for _, line := range strings.Split(string(diff), "\n") {
+		if strings.HasPrefix(line, "WARNING: ") {
+			out = append(out, line)
+		}
+	}
+	return out
 }
 
 // ask reads the answer: approve / refuse / defer (or a / r / d). It asks
@@ -301,7 +321,14 @@ func Diff(origDir, curDir string) ([]byte, error) {
 		if inOrig && inCur && bytes.Equal(oldB, newB) {
 			continue
 		}
-		if isBinary(oldB) || isBinary(newB) {
+		if !isText(oldB) || !isText(newB) {
+			// The warning is part of the diff bytes, so the hash binds it;
+			// git apply and patch skip lines like it.
+			label := newLabel
+			if !inCur {
+				label = oldLabel
+			}
+			fmt.Fprintf(&out, "WARNING: non-text file %s, %s; its content is not in this patch\n", label, sizes(len(oldB), inOrig, len(newB), inCur))
 			fmt.Fprintf(&out, "Binary files %s and %s differ\n", oldLabel, newLabel)
 			continue
 		}
@@ -338,9 +365,21 @@ func readOrEmpty(p string) ([]byte, error) {
 	return os.ReadFile(p)
 }
 
-// isBinary uses git's rule of thumb: a NUL byte in the first 8 KiB.
-func isBinary(b []byte) bool {
-	return bytes.IndexByte(b[:min(len(b), 8<<10)], 0) >= 0
+// isText reports whether b can go into a text patch: no NUL byte in the
+// first 8 KiB (git's rule of thumb for binary) and valid UTF-8.
+func isText(b []byte) bool {
+	return bytes.IndexByte(b[:min(len(b), 8<<10)], 0) < 0 && utf8.Valid(b)
+}
+
+// sizes describes a file's size, and what it was, for a WARNING line.
+func sizes(was int, inOrig bool, now int, inCur bool) string {
+	switch {
+	case !inOrig:
+		return fmt.Sprintf("%d bytes (new file)", now)
+	case !inCur:
+		return fmt.Sprintf("deleted, was %d bytes", was)
+	}
+	return fmt.Sprintf("%d bytes (was %d)", now, was)
 }
 
 // writeSymlinkChange notes a symlink that was added, removed, or changed.
@@ -361,6 +400,15 @@ func writeSymlinkChange(out *bytes.Buffer, rel string, o entry, inOrig bool, c e
 	}
 	was, now := target(o, inOrig), target(c, inCur)
 	if was != now {
+		label, e := "b/"+rel, c
+		if !inCur {
+			label, e = "a/"+rel, o
+		}
+		size := 0
+		if fi, err := os.Lstat(e.path); err == nil {
+			size = int(fi.Size()) // a symlink's size is the length of its target
+		}
+		fmt.Fprintf(out, "WARNING: non-text file %s (symlink), %d bytes; a symlink is not in this patch\n", label, size)
 		fmt.Fprintf(out, "Symlink %s: was %s, now %s\n", rel, was, now)
 	}
 }

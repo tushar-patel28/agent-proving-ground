@@ -113,7 +113,11 @@ const systemPrompt = `You are a coding agent. You work inside an isolated Linux 
 // The caller sets the timeout with context.WithTimeout; when the deadline
 // passes during a call, the call is cut off and the loop stops with
 // Exit = timeout. A cancelled ctx (Ctrl-C) is an error.
-func Run(ctx context.Context, client Client, sb sandbox.Sandbox, cfg Config, rec func(sandbox.Result)) (Result, error) {
+//
+// rec records every sandbox command, with its phase (trace.PhaseAgent for
+// commands that carry out a tool call, trace.PhasePolicy for the policy's
+// realpath lookups) and the step it belongs to.
+func Run(ctx context.Context, client Client, sb sandbox.Sandbox, cfg Config, rec func(phase string, step int, r sandbox.Result)) (Result, error) {
 	var res Result
 	tools, err := buildTools(cfg.Tools)
 	if err != nil {
@@ -124,7 +128,6 @@ func Run(ctx context.Context, client Client, sb sandbox.Sandbox, cfg Config, rec
 		return res, fmt.Errorf("limits must be positive: %+v, max_tokens %d", lim, cfg.MaxTokens)
 	}
 	pol := policy.New(cfg.Tools)
-	resolve := resolver(sb, rec)
 
 	// count_tokens takes the same request, but its tools field has its own
 	// union type, so the tool list is converted once here.
@@ -154,6 +157,13 @@ func Run(ctx context.Context, client Client, sb sandbox.Sandbox, cfg Config, rec
 	}
 
 	for n := 1; ; n++ {
+		// Recorders for step n: one for the tool call's own commands, one for
+		// the policy's lookups, so a reader can tell them apart (schema v1).
+		// (Since Go 1.22 each loop iteration has its own n, so these
+		// closures keep this step's number.)
+		agentRec := func(r sandbox.Result) { rec(trace.PhaseAgent, n, r) }
+		resolve := resolver(sb, func(r sandbox.Result) { rec(trace.PhasePolicy, n, r) })
+
 		// Budget check, before anything is spent on step n.
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			return stop(trace.ReasonTimeout)
@@ -254,7 +264,7 @@ func Run(ctx context.Context, client Client, sb sandbox.Sandbox, cfg Config, rec
 				continue
 			}
 			step.Verdict = trace.StepAllowed
-			o, err := runTool(ctx, sb, d, tu.Name, tu.Input, rec)
+			o, err := runTool(ctx, sb, d, tu.Name, tu.Input, agentRec)
 			if err != nil {
 				step.Output, step.IsError = "error: "+err.Error(), true
 				res.Steps = append(res.Steps, step)

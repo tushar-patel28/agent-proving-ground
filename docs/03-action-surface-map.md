@@ -1,7 +1,7 @@
 # 03 — Action surface map
 
 Drafted by Claude Code, reviewed by Tushar
-Date: Nov 13, 2026 (updated for T2.3 and T2.4 the same day)
+Date: Nov 13, 2026 (updated for T2.3, T2.4 and T2.5 the same day)
 Status: T2.1 draft, with T2.3's stop condition and T2.4's gate. T6.2 finishes this doc and docs/05-gates.md.
 
 This lists every action the agent can take, what the permission policy (`internal/policy`) checks before the action runs, and what the policy cannot stop. Every tool call goes through `policy.Check` before it runs. A denied call is never executed. It is written into the trace as a step with `verdict: "denied"`, the `rule`, and the `reason`, and the model gets that reason as an error result.
@@ -16,7 +16,7 @@ The agent acts only through the tools its task contract lists (`allowed_tools` i
 | `write_file` | `mkdir -p <dir>`, then `kubectl cp` of a host temp file to `<path>` | Rules 1, 2, 3 on the path; the path may not be `/workspace` itself |
 | `run_command` | `timeout 60 <argv…>`: argv form, no shell | Rules 1–5 on the program and every argument |
 
-Before an allowed call runs, the loop also runs `realpath -m -- <paths…>` in the pod (argv form) to get the real path of each path the call names. That command is recorded in the trace too.
+Before an allowed call runs, the loop also runs `realpath -m -- <paths…>` in the pod (argv form) to get the real path of each path the call names. That command is recorded in the trace too, under phase `policy` with actor `harness` (schema v1, docs/trace-schema.md), so it is never mistaken for one of the agent's commands.
 
 The working directory of every `kubectl exec` is `/workspace`. `kubectl exec` has no working-directory option, so the pod spec sets `workingDir: /workspace` on the container (`internal/sandbox/kind.go`) instead of relying on the image's `WORKDIR`. The policy resolves relative paths against `/workspace`, so this must hold. In the seeded run below, `python -c "import os; print(os.getcwd())"` printed `/workspace`, and `cat calc/ops.py` read the file that `realpath` reported as `/workspace/calc/ops.py`.
 
@@ -69,7 +69,7 @@ The sed script check (`internal/policy/sed.go`) is an allowlist parser. It denie
 
 The agent's changes leave the sandbox only through the human gate (`internal/gate`, T2.4). No agent tool reaches it: the loop offers only `read_file`, `write_file` and `run_command`, and neither `internal/loop` nor `internal/policy` imports the gate (both are tested).
 1. After the verdict, while the pod is still alive, the harness kills leftover processes, copies `/workspace` out, and diffs it against the task's original repo. The diff leaves out `__pycache__` and `.pytest_cache`.
-2. It shows the approver the full diff, the check result and exit code, the exit reason, and the first 12 characters of the diff's SHA-256.
+2. It shows the approver the full diff, the check result and exit code, the exit reason, and the first 12 characters of the diff's SHA-256. Every binary or non-text file (a NUL byte, invalid UTF-8, or a symlink) gets a `WARNING:` line in the diff with its path and size, repeated after the diff. Its content is not in the patch (T2.5).
 3. The SHA-256 of the exact bytes shown is recorded. Before an approved patch is written, the diff is rebuilt from the pod. A different hash, or a failed rebuild, voids the approval, and nothing is exported.
 4. The outcomes:
    - **approve:** writes `out/<run_id>/approved.patch`
@@ -94,6 +94,8 @@ Real runs of task 001 with `claude-haiku-5-5`, Nov 13, 2026:
 - **Approve:** `evidence/traces/20261113T222626Z-2f2b40ec.json`, with the patch in `evidence/patches/20261113T222626Z-2f2b40ec.approved.patch`.
 - **Refuse:** `evidence/traces/20261113T222801Z-3922d73c.json`. Nothing was written.
 
+**How "a terminal" is decided.** Since T2.5, `apg` asks the kernel for the terminal's settings (the ioctl behind `tcgetattr`, `cmd/apg/term.go`), which succeeds only on a terminal. In T2.4 it checked only that stdin was a character device, and `/dev/null` is one. So `apg run … < /dev/null` took the interactive path, read end-of-input, and deferred "with no answer", recording `interactive: true`. The decision happened to be the same (deferred, nothing exported), but the trace was wrong. Found in the first T2.5 runs of 002–005 (`evidence/traces/20261113T2304*`/`T2305*`) and fixed before the second runs (`20261113T2307*`/`T2308*`). On systems other than macOS and Linux, `isTerminal` is always false, so the gate always defers.
+
 **The gate trusts whoever types at the terminal.** It checks only that stdin is a terminal, not who is behind it. A pseudo-terminal counts as a terminal, so a program can answer the gate: the build agent did exactly that in the two scripted runs above. What keeps the agent under test away from it is that the agent has no tool that reaches the gate. Anyone, or any program, with access to the operator's terminal can still answer it, and the trace cannot tell a scripted answer from a human one: both record `interactive: true`.
 
 Not checked:
@@ -117,7 +119,7 @@ Further gaps the policy has and that nothing tests yet:
   4. delete the directory
 
   All of this happens before the agent's next step, so no agent process is alive while the check exists. A seeded run on kind showed this: the agent left a "tamperer" running that kept overwriting any check it found with `exit 0`. The kill removed it before the check was copied in, the check failed honestly, and python found no check directory at the next step. The model is told only `The task is not complete yet.`, never the check's output.
-- **The agent's code runs inside the check.** pytest imports the package under test, so that code could read the check while it runs and copy it into `/workspace`. Each check run records `changed_workspace`, but nothing prevents the copy short of running the check as another user. `check.sh` runs python with `-B` so the check itself writes no `__pycache__` files into `/workspace`. Without it, `-I` ignored the image's `PYTHONDONTWRITEBYTECODE`, and every check left `.pyc` files the agent could see (found in T2.3). Since T2.4 every check run also deletes every `__pycache__` in `/workspace` after the kill and before the check, so a `.pyc` the agent planted there cannot stand in for the source. The fingerprint and the gate's diff ignore `__pycache__` and `.pytest_cache`. Not checked: a bare `.pyc` with no `.py` next to it (for example `calc/ops.pyc` after deleting `ops.py`) can still be imported by Python's sourceless loader.
+- **The agent's code runs inside the check.** pytest imports the package under test, so that code could read the check while it runs and copy it into `/workspace`. Each check run records `changed_workspace`, but nothing prevents the copy short of running the check as another user. `check.sh` runs python with `-B` so the check itself writes no `__pycache__` files into `/workspace`. Without it, `-I` ignored the image's `PYTHONDONTWRITEBYTECODE`, and every check left `.pyc` files the agent could see (found in T2.3). Every check run also deletes Python bytecode from `/workspace` after the kill and before the check: every `__pycache__` directory (T2.4), and since T2.5 every other `*.pyc` file or symlink. So a `.pyc` the agent planted cannot stand in for the source, including a bare `calc/ops.pyc` with no `ops.py`, which Python's sourceless loader would import. The fingerprint and the gate's diff ignore `__pycache__` and `.pytest_cache`. A bare `.pyc` is still in the fingerprint, so planting one triggers a check, which then deletes it. In the gate's diff it shows as a WARNING line. Not checked: bytecode under another name (Python only loads `.pyc` for imports, but code the agent wrote could load anything at run time, as with python itself).
 - **What the fingerprint sees.** It covers the sha256 of every regular file (`find /workspace -type f -exec sha256sum`). A step that only adds a symlink or an empty directory does not count as a change and runs no check. The final check still runs.
 - **Kill limits.** The kill loop makes 20 passes of `kill(-1, SIGKILL)`. A process that forks faster than that could survive, and the run then ends as a harness error rather than running the check.
 - **The test file is writable on purpose.** `tests/test_ops.py` is inside `/workspace`, so `write_file` may change it. The check's SHA-256 of the test file catches that (`check.sh`, T1.1). This is the Phase 6 controlled failure (premortem P1), so the policy must not hide it.

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Hidden check for task 001. It is never in the sandbox during the agent's run;
-# the harness copies it in afterward (to /tmp/check.sh) and runs it.
+# Hidden check for task 001. The agent never sees it: the harness copies it into
+# a new random directory (/tmp/apg-check-...) only while no agent process is
+# running, runs it, and deletes it before the agent's next step (T2.3).
 # Exit 0 = PASS, anything else = FAIL.
 #
 # Known limit: the code under test runs inside the pytest process, so it could

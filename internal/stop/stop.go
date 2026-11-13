@@ -44,10 +44,17 @@ var FingerprintCmd = []string{"find", "/workspace",
 	"(", "-name", "__pycache__", "-o", "-name", ".pytest_cache", ")", "-prune",
 	"-o", "-type", "f", "-exec", "sha256sum", "--", "{}", "+"}
 
-// CleanPycacheCmd deletes every __pycache__ directory in /workspace. Each
-// check run does this after the kill and before the check, so a .pyc the
-// agent planted there cannot be loaded in place of the source.
-var CleanPycacheCmd = []string{"find", "/workspace", "-name", "__pycache__", "-type", "d", "-prune", "-exec", "rm", "-rf", "--", "{}", "+"}
+// CleanPycacheCmd deletes Python bytecode from /workspace: every
+// __pycache__ directory, and every other *.pyc (a file or a symlink). Each
+// check run does this after the kill and before the check, so bytecode the
+// agent planted cannot be loaded in place of the source, including a bare
+// calc/ops.pyc with no ops.py, which Python imports without a source file.
+// The pattern "*.pyc" reaches find as is: there is no shell to expand it.
+// The "(" ... ")" group makes "-type f -o -type l" bind before -exec
+// (argv, so no backslashes are needed, unlike in a shell).
+var CleanPycacheCmd = []string{"find", "/workspace",
+	"-name", "__pycache__", "-type", "d", "-prune", "-exec", "rm", "-rf", "--", "{}", "+",
+	"-o", "-name", "*.pyc", "(", "-type", "f", "-o", "-type", "l", ")", "-exec", "rm", "-f", "--", "{}", "+"}
 
 // killScript kills every process in the pod except PID 1 (the container's
 // "sleep infinity") and itself, and prints what it killed as JSON.

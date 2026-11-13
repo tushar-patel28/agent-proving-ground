@@ -93,7 +93,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 	// The human gate. It prompts on stderr, so stdout keeps only the result
 	// line. Without a terminal on stdin it always defers.
-	g := &gate.Config{In: os.Stdin, Out: stderr, Interactive: stdinIsTerminal(), OutDir: opts.outDir}
+	g := &gate.Config{In: os.Stdin, Out: stderr, Interactive: isTerminal(os.Stdin), OutDir: opts.outDir}
 	tr := runTask(ctx, sb, sb.PodName(), tk, client, g)
 
 	path, err := trace.Write(opts.tracesDir, tr)
@@ -305,7 +305,9 @@ func runTask(ctx context.Context, sb sandbox.Sandbox, pod string, tk task, clien
 	// makes it variadic: it takes any number of Results.
 	rec := func(phase string, rs ...sandbox.Result) {
 		for _, r := range rs {
-			tr.Commands = append(tr.Commands, trace.Command{Phase: phase, Result: r})
+			// ActorFor marks the command as the harness's own work, unless
+			// the phase is agent (schema v1).
+			tr.Commands = append(tr.Commands, trace.Command{Phase: phase, Actor: trace.ActorFor(phase), Result: r})
 		}
 	}
 
@@ -409,11 +411,12 @@ func runAgent(ctx context.Context, sb sandbox.Sandbox, tk task, client loop.Clie
 	agentCtx, cancel := context.WithTimeout(ctx, tk.Limits.Timeout)
 	defer cancel()
 	began := time.Now()
-	res, err := loop.Run(agentCtx, client, sb, cfg, func(r sandbox.Result) { rec(trace.PhaseAgent, r) })
+	res, err := loop.Run(agentCtx, client, sb, cfg, func(phase string, step int, r sandbox.Result) {
+		tr.Commands = append(tr.Commands, trace.Command{Phase: phase, Actor: trace.ActorFor(phase), Step: step, Result: r})
+	})
 	elapsed := time.Since(began)
 
 	tr.Model, tr.Steps, tr.LoopStop = model, res.Steps, res.Stop
-	tr.TotalInputTokens, tr.TotalOutputTokens, tr.EstimatedCostUSD = res.Used.InputTokens, res.Used.OutputTokens, res.Used.CostUSD
 	tr.Budget = &trace.Budget{
 		Limits: trace.BudgetLimits{
 			MaxSteps:            tk.Limits.MaxSteps,
@@ -489,12 +492,4 @@ func buildDiff(sb sandbox.Sandbox, tk task, checker *stop.Checker, rec func(stri
 		}
 		return gate.Diff(tk.Repo, ws)
 	}
-}
-
-// stdinIsTerminal reports whether stdin is a terminal (a character
-// device), using only the standard library. A pipe, a file, or /dev/null
-// is not, and then the gate defers.
-func stdinIsTerminal() bool {
-	fi, err := os.Stdin.Stat()
-	return err == nil && fi.Mode()&os.ModeCharDevice != 0
 }

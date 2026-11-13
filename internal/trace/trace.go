@@ -1,6 +1,7 @@
-// Package trace defines the run trace (schema v0) and writes it to disk as
-// traces/<run_id>.json. A trace records everything the harness did in one
-// run, so a PASS or FAIL can be checked afterward.
+// Package trace defines the run trace (schema v1, docs/trace-schema.md),
+// writes it to disk as traces/<run_id>.json, and reads it back strictly
+// (Decode). A trace records everything the harness did in one run, so a
+// PASS or FAIL can be checked afterward.
 package trace
 
 import (
@@ -8,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -17,7 +19,10 @@ import (
 )
 
 // SchemaVersion is written into every trace so readers know the format.
-const SchemaVersion = 0
+// v1 (T2.5): commands say who issued them (actor, step), realpath lookups
+// have their own phase (policy), and the token and cost totals live only
+// in budget.used. Traces before T2.5 are v0.
+const SchemaVersion = 1
 
 // ExitReason says why a run stopped. It is its own type (a string
 // underneath), so a function that takes an ExitReason cannot be handed
@@ -81,12 +86,9 @@ type Trace struct {
 	Error         string     `json:"error,omitempty"` // harness error; omitempty drops it when ""
 
 	// Agent fields. omitempty leaves them out of --no-agent traces.
-	Model             string  `json:"model,omitempty"`
-	LoopStop          string  `json:"loop_stop,omitempty"` // why the agent loop ended: end_turn | max_steps | max_tokens | refusal
-	TotalInputTokens  int64   `json:"total_input_tokens,omitempty"`
-	TotalOutputTokens int64   `json:"total_output_tokens,omitempty"`
-	EstimatedCostUSD  float64 `json:"estimated_cost_usd,omitempty"` // from list prices; not a bill
-	Budget            *Budget `json:"budget,omitempty"`             // pointer: nil (omitted) without an agent
+	Model    string  `json:"model,omitempty"`
+	LoopStop string  `json:"loop_stop,omitempty"` // why the agent loop ended: end_turn | max_tokens | refusal | limit | check_passed
+	Budget   *Budget `json:"budget,omitempty"`    // limits and totals used; pointer: nil (omitted) without an agent
 
 	Gate *Gate `json:"gate,omitempty"` // the human gate (T2.4); nil when no gate ran
 }
@@ -159,9 +161,12 @@ type BudgetUsed struct {
 	CountTokensCalls int     `json:"count_tokens_calls"` // pre-call token counts (free API calls, not in the totals)
 }
 
-// Command is one host command the sandbox ran, tagged with the run phase.
+// Command is one host command the sandbox ran, tagged with the run phase
+// and with who it was for.
 type Command struct {
-	Phase string `json:"phase"` // start | setup | agent | check | stop
+	Phase string `json:"phase"`          // start | setup | agent | policy | fingerprint | check | gate | stop
+	Actor string `json:"actor"`          // agent: it carried out an agent tool call; harness: anything else
+	Step  int    `json:"step,omitempty"` // the agent step it belongs to (agent and policy commands); 0 otherwise
 
 	// Embedded struct (a type with no field name): its fields (args,
 	// stdout, stderr, exit_code) appear directly in this JSON object.
@@ -197,15 +202,37 @@ const (
 
 // Phases of a run, used in Command.Phase.
 const (
-	PhaseStart = "start"
-	PhaseSetup = "setup"
-	PhaseAgent = "agent" // commands run by the agent's tool calls
+	PhaseStart  = "start"
+	PhaseSetup  = "setup"
+	PhaseAgent  = "agent"  // commands that carry out the agent's tool calls
+	PhasePolicy = "policy" // realpath lookups the policy makes before a call runs (T2.1)
 
 	PhaseFingerprint = "fingerprint" // the harness hashing /workspace after a step
 	PhaseGate        = "gate"        // the human gate: kill, copy /workspace out (T2.4)
 	PhaseCheck       = "check"
 	PhaseStop        = "stop"
 )
+
+// Actors, used in Command.Actor.
+const (
+	ActorAgent   = "agent"
+	ActorHarness = "harness"
+)
+
+// ActorFor returns who a command in this phase is for: only phase agent
+// carries out the agent's tool calls; every other phase is the harness's
+// own work (setup, policy lookups, fingerprints, checks, gate, stop).
+func ActorFor(phase string) string {
+	if phase == PhaseAgent {
+		return ActorAgent
+	}
+	return ActorHarness
+}
+
+var validPhases = map[string]bool{
+	PhaseStart: true, PhaseSetup: true, PhaseAgent: true, PhasePolicy: true,
+	PhaseFingerprint: true, PhaseCheck: true, PhaseGate: true, PhaseStop: true,
+}
 
 // NewRunID returns a sortable, file-name-safe run ID: UTC time plus a
 // suffix, e.g. "20261112T050102Z-1a2b3c4d".
@@ -238,7 +265,171 @@ func (t *Trace) Validate() error {
 	if t.Verdict != VerdictPass && t.Verdict != VerdictFail {
 		errs = append(errs, fmt.Errorf("verdict %q, want PASS or FAIL", t.Verdict))
 	}
+	if t.Pod == "" {
+		errs = append(errs, errors.New("pod is empty"))
+	}
+	if t.StartedAt.IsZero() || t.EndedAt.Before(t.StartedAt) {
+		errs = append(errs, fmt.Errorf("started_at %v / ended_at %v out of order", t.StartedAt, t.EndedAt))
+	}
+	for i, c := range t.Commands {
+		if !validPhases[c.Phase] {
+			errs = append(errs, fmt.Errorf("commands[%d]: phase %q", i, c.Phase))
+		}
+		if c.Actor != ActorFor(c.Phase) {
+			errs = append(errs, fmt.Errorf("commands[%d]: actor %q in phase %q, want %q", i, c.Actor, c.Phase, ActorFor(c.Phase)))
+		}
+	}
+	for i, s := range t.Steps {
+		if s.N != i+1 {
+			errs = append(errs, fmt.Errorf("steps[%d]: n = %d, want %d", i, s.N, i+1))
+		}
+		switch s.Verdict {
+		case "", StepAllowed:
+		case StepDenied:
+			if s.Rule == "" || s.Reason == "" {
+				errs = append(errs, fmt.Errorf("steps[%d]: denied without a rule and reason", i))
+			}
+		default:
+			errs = append(errs, fmt.Errorf("steps[%d]: verdict %q", i, s.Verdict))
+		}
+	}
+	// The verdict is the check's result (D11), and only error skips it.
+	switch {
+	case t.ExitReason == ReasonError:
+		if t.Check.Ran || t.Verdict != VerdictFail {
+			errs = append(errs, errors.New("exit_reason error, but the check ran or the verdict is not FAIL"))
+		}
+	case !t.Check.Ran || t.Check.ExitCode == nil:
+		errs = append(errs, errors.New("the check did not run, but exit_reason is not error"))
+	case (*t.Check.ExitCode == 0) != (t.Verdict == VerdictPass):
+		errs = append(errs, fmt.Errorf("verdict %s does not match check exit code %d", t.Verdict, *t.Check.ExitCode))
+	}
+	for i, r := range t.CheckRuns {
+		if r.Trigger != TriggerWorkspaceChanged && r.Trigger != TriggerFinal {
+			errs = append(errs, fmt.Errorf("check_runs[%d]: trigger %q", i, r.Trigger))
+		}
+		if r.Passed != (r.ExitCode == 0) {
+			errs = append(errs, fmt.Errorf("check_runs[%d]: passed %v with exit code %d", i, r.Passed, r.ExitCode))
+		}
+	}
+	if (t.Model != "") != (t.Budget != nil) {
+		errs = append(errs, errors.New("model and budget must be set together (an agent run) or not at all"))
+	}
+	if t.Gate != nil && !validDecisions[t.Gate.Decision] {
+		errs = append(errs, fmt.Errorf("gate decision %q", t.Gate.Decision))
+	}
 	return errors.Join(errs...)
+}
+
+// validDecisions are the gate's decisions (internal/gate Decision*).
+var validDecisions = map[string]bool{
+	"approved": true, "refused": true, "deferred": true, "skipped": true, "void": true, "error": true,
+}
+
+// required lists, for each JSON object in a trace, the keys that must be
+// present. Keys left out of this list are optional (omitempty).
+var required = map[string][]string{
+	"trace":     {"schema_version", "run_id", "task_id", "pod", "started_at", "ended_at", "commands", "steps", "exit_reason", "verdict", "check", "check_runs"},
+	"command":   {"phase", "actor", "args", "stdout", "stderr", "exit_code"},
+	"step":      {"n", "stop_reason", "input_tokens", "output_tokens"},
+	"check":     {"ran"},
+	"check_run": {"after_step", "trigger", "exit_code", "passed", "killed", "workspace_sha256", "changed_workspace"},
+	"budget":    {"limits", "from_contract", "used"},
+	"limits":    {"max_steps", "max_total_tokens", "max_cost_usd", "timeout_seconds", "max_policy_violations", "max_reply_tokens"},
+	"used":      {"steps", "input_tokens", "output_tokens", "total_tokens", "cost_usd", "agent_seconds", "policy_violations", "count_tokens_calls"},
+	"gate":      {"decision", "interactive", "shown", "diff_bytes", "decided_at"},
+}
+
+// Decode reads one v1 trace strictly, with the standard library only:
+//  1. every key must be one the schema knows (DisallowUnknownFields);
+//  2. every required key must be present (checked on a generic copy);
+//  3. the values must pass Validate.
+//
+// v0 traces (before T2.5) fail on purpose: their schema_version is 0.
+func Decode(r io.Reader) (*Trace, error) {
+	b, err := io.ReadAll(r)
+	if err != nil {
+		return nil, err
+	}
+	var t Trace
+	dec := json.NewDecoder(bytes.NewReader(b))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&t); err != nil {
+		return nil, fmt.Errorf("decode: %w", err)
+	}
+	if dec.More() {
+		return nil, errors.New("decode: extra data after the trace")
+	}
+	if err := checkRequired(b); err != nil {
+		return nil, err
+	}
+	if err := t.Validate(); err != nil {
+		return nil, err
+	}
+	return &t, nil
+}
+
+// object decodes raw as a JSON object and checks it has every key that
+// required[kind] lists. map[string]json.RawMessage keeps each value as raw
+// JSON, to be decoded further only where needed.
+func object(raw json.RawMessage, kind, where string) (map[string]json.RawMessage, error) {
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return nil, fmt.Errorf("%s: %w", where, err)
+	}
+	for _, k := range required[kind] {
+		if _, ok := m[k]; !ok {
+			return nil, fmt.Errorf("%s: missing required key %q", where, k)
+		}
+	}
+	return m, nil
+}
+
+// list decodes raw as a JSON array and checks each element as kind.
+func list(raw json.RawMessage, kind, where string) error {
+	var items []json.RawMessage
+	if err := json.Unmarshal(raw, &items); err != nil {
+		return fmt.Errorf("%s: %w", where, err)
+	}
+	for i, it := range items {
+		if _, err := object(it, kind, fmt.Sprintf("%s[%d]", where, i)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func checkRequired(b []byte) error {
+	top, err := object(b, "trace", "trace")
+	if err != nil {
+		return err
+	}
+	if _, err := object(top["check"], "check", "check"); err != nil {
+		return err
+	}
+	for key, kind := range map[string]string{"commands": "command", "steps": "step", "check_runs": "check_run"} {
+		if err := list(top[key], kind, key); err != nil {
+			return err
+		}
+	}
+	if raw, ok := top["budget"]; ok {
+		b, err := object(raw, "budget", "budget")
+		if err != nil {
+			return err
+		}
+		if _, err := object(b["limits"], "limits", "budget.limits"); err != nil {
+			return err
+		}
+		if _, err := object(b["used"], "used", "budget.used"); err != nil {
+			return err
+		}
+	}
+	if raw, ok := top["gate"]; ok {
+		if _, err := object(raw, "gate", "gate"); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // Write validates t and writes it to dir/<run_id>.json. It never
@@ -266,6 +457,11 @@ func Write(dir string, t *Trace) (string, error) {
 	enc.SetIndent("", "  ")
 	if err := enc.Encode(t); err != nil {
 		return "", err
+	}
+	// Read back what is about to be written, strictly: a trace that Decode
+	// would reject is never written.
+	if _, err := Decode(bytes.NewReader(buf.Bytes())); err != nil {
+		return "", fmt.Errorf("invalid trace: %w", err)
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err

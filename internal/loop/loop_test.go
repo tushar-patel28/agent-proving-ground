@@ -134,9 +134,18 @@ func TestRunReadWriteEnd(t *testing.T) {
 		return sandbox.Result{}
 	}}
 	var recorded []sandbox.Result
-	res, err := Run(context.Background(), client, sb, cfg(), func(r sandbox.Result) { recorded = append(recorded, r) })
+	var phases []string // "phase/step" for each recorded command
+	res, err := Run(context.Background(), client, sb, cfg(), func(phase string, step int, r sandbox.Result) {
+		recorded = append(recorded, r)
+		phases = append(phases, phase+"/"+itoa(step))
+	})
 	if err != nil {
 		t.Fatal(err)
+	}
+	// The policy's realpath lookups and the tool calls' own commands are
+	// recorded under their own phases, with their step (schema v1).
+	if got := strings.Join(phases, " "); got != "policy/1 agent/1 policy/2 agent/2 agent/2" {
+		t.Errorf("recorded phases = %s", got)
 	}
 
 	if len(res.Steps) != 3 || res.Stop != StopEndTurn {
@@ -214,7 +223,7 @@ func TestRunStopsAtMaxSteps(t *testing.T) {
 	client := &fakeClient{responses: resp}
 	c := cfg()
 	c.Limits.MaxSteps = 4
-	res, err := Run(context.Background(), client, &fakeSandbox{}, c, func(sandbox.Result) {})
+	res, err := Run(context.Background(), client, &fakeSandbox{}, c, func(string, int, sandbox.Result) {})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -242,7 +251,7 @@ func TestRunRejectsBadCalls(t *testing.T) {
 				endTurn("ok", 10, 5),
 			}}
 			sb := &fakeSandbox{}
-			res, err := Run(context.Background(), client, sb, cfg(), func(sandbox.Result) {})
+			res, err := Run(context.Background(), client, sb, cfg(), func(string, int, sandbox.Result) {})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -268,7 +277,7 @@ func TestToolNotInContractIsNotOffered(t *testing.T) {
 	client := &fakeClient{responses: []string{endTurn("nothing to do", 10, 5)}}
 	c := cfg()
 	c.Tools = []string{"read_file"}
-	if _, err := Run(context.Background(), client, &fakeSandbox{}, c, func(sandbox.Result) {}); err != nil {
+	if _, err := Run(context.Background(), client, &fakeSandbox{}, c, func(string, int, sandbox.Result) {}); err != nil {
 		t.Fatal(err)
 	}
 	tb, _ := json.Marshal(client.calls[0].Tools)
@@ -280,7 +289,7 @@ func TestToolNotInContractIsNotOffered(t *testing.T) {
 func TestUnknownContractToolIsAnError(t *testing.T) {
 	c := cfg()
 	c.Tools = []string{"read_file", "browse_web"}
-	if _, err := Run(context.Background(), &fakeClient{}, &fakeSandbox{}, c, func(sandbox.Result) {}); err == nil {
+	if _, err := Run(context.Background(), &fakeClient{}, &fakeSandbox{}, c, func(string, int, sandbox.Result) {}); err == nil {
 		t.Error("an unknown tool in the contract should fail the run")
 	}
 }
@@ -294,7 +303,7 @@ func TestRunCommandOutputAndTruncation(t *testing.T) {
 	sb := &fakeSandbox{exec: func([]string) sandbox.Result {
 		return sandbox.Result{Stdout: big, Stderr: "command terminated with exit code 1\n", ExitCode: 1}
 	}}
-	res, err := Run(context.Background(), client, sb, cfg(), func(sandbox.Result) {})
+	res, err := Run(context.Background(), client, sb, cfg(), func(string, int, sandbox.Result) {})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -327,7 +336,7 @@ func TestStopsOnMaxTokensWithoutRunningTool(t *testing.T) {
 	resp := strings.Replace(toolUse("toolu_1", "run_command", `{"argv":["find",".","-name","x"]}`, 10, 5),
 		`"stop_reason":"tool_use"`, `"stop_reason":"max_tokens"`, 1)
 	sb := &fakeSandbox{}
-	res, err := Run(context.Background(), &fakeClient{responses: []string{resp}}, sb, cfg(), func(sandbox.Result) {})
+	res, err := Run(context.Background(), &fakeClient{responses: []string{resp}}, sb, cfg(), func(string, int, sandbox.Result) {})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -337,7 +346,7 @@ func TestStopsOnMaxTokensWithoutRunningTool(t *testing.T) {
 }
 
 func TestAPIErrorIsReturned(t *testing.T) {
-	_, err := Run(context.Background(), &fakeClient{err: errors.New("529 overloaded")}, &fakeSandbox{}, cfg(), func(sandbox.Result) {})
+	_, err := Run(context.Background(), &fakeClient{err: errors.New("529 overloaded")}, &fakeSandbox{}, cfg(), func(string, int, sandbox.Result) {})
 	if err == nil || !strings.Contains(err.Error(), "529") {
 		t.Errorf("err = %v", err)
 	}
@@ -352,7 +361,7 @@ func TestSymlinkDeniedAfterRealpath(t *testing.T) {
 	}}
 	sb := &fakeSandbox{links: map[string]string{"/workspace/etc-link": "/etc"}}
 	var recorded []sandbox.Result
-	res, err := Run(context.Background(), client, sb, cfg(), func(r sandbox.Result) { recorded = append(recorded, r) })
+	res, err := Run(context.Background(), client, sb, cfg(), func(_ string, _ int, r sandbox.Result) { recorded = append(recorded, r) })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -375,7 +384,7 @@ func TestRunCommandArgv(t *testing.T) {
 		endTurn("ok", 10, 5),
 	}}
 	sb := &fakeSandbox{}
-	if _, err := Run(context.Background(), client, sb, cfg(), func(sandbox.Result) {}); err != nil {
+	if _, err := Run(context.Background(), client, sb, cfg(), func(string, int, sandbox.Result) {}); err != nil {
 		t.Fatal(err)
 	}
 	last := sb.execs[len(sb.execs)-1]

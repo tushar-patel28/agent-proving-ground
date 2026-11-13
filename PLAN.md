@@ -15,7 +15,7 @@ Build plan for Tushar Patel's INFO7375 final project. Every chat in this Project
 ## Current status
 
 - **Phase:** 2 — The full agentic loop
-- **Next task:** T2.5
+- **Next task:** T3.1
 - **Last updated:** Nov 13, 2026
 
 ---
@@ -179,7 +179,18 @@ Goal: one task, one kind pod, one trace file, one PASS/FAIL line.
 3. In batch mode (`apg eval`), the gate always defers. Nothing is exported unattended.
 - **Done when:** tests cover approve, refuse, defer, and a changed-diff approval being rejected.
 
-**T2.5 Trace schema v1 and 5 tasks**
+**T2.5 Trace schema v1 and 5 tasks** ✅ Done Nov 13:
+- **Schema v1** (`docs/trace-schema.md`): commands carry `actor` (agent | harness) and `step`, and `realpath` lookups have their own phase `policy`. The top-level token and cost totals are gone (`budget.used` only).
+- **Validation:** `trace.Decode` decodes strictly (DisallowUnknownFields, required keys, value checks). `trace.Write` decodes every trace it writes, and `TestEvidenceTraces` decodes every v1 evidence trace (9 v1; the 13 v0 traces are kept as they were).
+- **Small fixes:** every `*.pyc` is deleted before each check; the gate shows a WARNING line with path and size for every non-text file.
+- **Tasks 002–005** (off-by-one, slugify, implement from a docstring, a fix across two files), with `reference.patch` for 001–005 outside `repo/`. `cmd/apg/tasks_test.go` runs each check in apg-sandbox:dev: FAIL untouched, PASS with the reference patch.
+- **Bug found and fixed:** the T2.4 terminal check took `/dev/null` for a terminal. It now uses the tcgetattr ioctl.
+- **Real runs** with `claude-haiku-5-5`, stdin `/dev/null`, after the fix:
+  - `002 PASS steps=4`, `003 PASS steps=4`, `004 PASS steps=5`, `005 PASS steps=7`: all `reason=check_passed gate=deferred`, with `interactive: false`.
+  - In 005, the check after step 6 (one file fixed) failed and the check after step 7 passed.
+  - Evidence: evidence/traces/20261113T230736Z-5465d81d, …230750Z-8b6ebce6, …230804Z-ac0f7f94, …230821Z-607ddc3e. The pre-fix runs are kept and labelled in docs/trace-schema.md.
+  - `001 PASS steps=5 gate=deferred` (20261113T230904Z-3d625236) gives 001 a v1 trace.
+- **M2:** loop, tools, policy, stop and gate all exist with tests. The milestone row waits for the course-repo sync hash.
 1. `docs/trace-schema.md`: every field explained.
 2. Add tasks 002–005.
 - **Done when:** all 5 tasks run, and each trace validates against the schema.
@@ -334,6 +345,7 @@ Goal: one task, one kind pod, one trace file, one PASS/FAIL line.
 | D21 | Nov 13 | Budget exits: the exit reason says why the loop stopped and the verdict is still the check's result (PASS with `budget_steps` is possible); the timeout covers the agent loop only (setup, check and stop have fixed harness limits, so the check and pod cleanup run after a timeout); a step starts only if `count_tokens` input + the full per-reply max_tokens fits the token and cost limits; Ctrl-C is `error`, not `timeout` | Decided |
 | D22 | Nov 13 | Stop condition: the check runs after any step that changes /workspace (sha256 fingerprint of every regular file, taken by the harness), and a pass stops the run; the model hears only "The task is not complete yet."; before every check run all pod processes except PID 1 are killed, and the check dir is deleted before the next step; reply cap 4,096 tokens | Decided |
 | D23 | Nov 13 | The gate's outcome goes in the trace's `gate` section, not in `exit_reason`. exit_reason stays the loop's reason, and `gate_refused`/`gate_deferred` stay on the fixed list but are never set. Why: `apg eval` is never interactive, so its gate always defers, and every eval row would otherwise read `gate_deferred`, hiding why the loop stopped. The gate is bound to the SHA-256 of the exact diff shown, and the diff is rebuilt from the pod before export | Decided |
+| D24 | Nov 13 | Trace schema v1: every command says who it was for (actor agent/harness, step), the policy's realpath lookups get phase `policy`, totals live only in budget.used; traces are read back with a strict standard-library decode, and v0 traces stay as they were. "stdin is a terminal" is decided by the tcgetattr ioctl, not the file mode | Decided |
 
 ---
 
