@@ -36,8 +36,18 @@ import (
 
 // FingerprintCmd lists the sha256 of every regular file in /workspace
 // (argv, no shell; the policy limits only the agent, so -exec is fine
-// here). Symlinks and empty directories are not part of the fingerprint.
-var FingerprintCmd = []string{"find", "/workspace", "-type", "f", "-exec", "sha256sum", "--", "{}", "+"}
+// here). Symlinks and empty directories are not part of the fingerprint,
+// and neither are the tool caches __pycache__ and .pytest_cache: "-prune"
+// skips those directories, and "-o" (or) sends everything else to the
+// sha256sum branch.
+var FingerprintCmd = []string{"find", "/workspace",
+	"(", "-name", "__pycache__", "-o", "-name", ".pytest_cache", ")", "-prune",
+	"-o", "-type", "f", "-exec", "sha256sum", "--", "{}", "+"}
+
+// CleanPycacheCmd deletes every __pycache__ directory in /workspace. Each
+// check run does this after the kill and before the check, so a .pyc the
+// agent planted there cannot be loaded in place of the source.
+var CleanPycacheCmd = []string{"find", "/workspace", "-name", "__pycache__", "-type", "d", "-prune", "-exec", "rm", "-rf", "--", "{}", "+"}
 
 // killScript kills every process in the pod except PID 1 (the container's
 // "sleep infinity") and itself, and prints what it killed as JSON.
@@ -139,13 +149,19 @@ func (c *Checker) AfterStep(ctx context.Context, n int) (StepResult, error) {
 // afterStep is the step that triggered it (0 for the final check). The
 // error is only for harness failures.
 //
-// Order: kill the agent's processes, fingerprint, copy the check into a
-// new directory with a random name, run it, kill again (nothing the check
-// started may outlive it), delete the directory, fingerprint again.
+// Order: kill the agent's processes, delete __pycache__, fingerprint, copy
+// the check into a new directory with a random name, run it, kill again
+// (nothing the check started may outlive it), delete the directory,
+// fingerprint again.
 func (c *Checker) Run(ctx context.Context, trigger string, afterStep int) (int, error) {
-	killed, err := c.kill(ctx)
+	killed, err := c.Kill(ctx, trace.PhaseCheck)
 	if err != nil {
 		return 0, err
+	}
+	r, err := c.sb.Exec(ctx, CleanPycacheCmd...)
+	c.rec(trace.PhaseCheck, r)
+	if err != nil || r.ExitCode != 0 {
+		return 0, fmt.Errorf("delete __pycache__ (exit %d, err %v): %s", r.ExitCode, err, strings.TrimSpace(r.Stderr))
 	}
 	before, err := c.fingerprint(ctx)
 	if err != nil {
@@ -159,7 +175,7 @@ func (c *Checker) Run(ctx context.Context, trigger string, afterStep int) (int, 
 	// policy.CheckDirPrefix: the policy's rule 3 denies any tool call that
 	// names it.
 	dir := policy.CheckDirPrefix + hex.EncodeToString(b)
-	r, err := c.sb.Exec(ctx, "mkdir", "-m", "700", dir)
+	r, err = c.sb.Exec(ctx, "mkdir", "-m", "700", dir)
 	c.rec(trace.PhaseCheck, r)
 	if err != nil || r.ExitCode != 0 {
 		return 0, fmt.Errorf("mkdir %s (exit %d, err %v)", dir, r.ExitCode, err)
@@ -191,7 +207,7 @@ func (c *Checker) Run(ctx context.Context, trigger string, afterStep int) (int, 
 	}
 	code := r.ExitCode
 
-	if _, err := c.kill(ctx); err != nil {
+	if _, err := c.Kill(ctx, trace.PhaseCheck); err != nil {
 		return 0, err
 	}
 	r, err = c.sb.Exec(ctx, "rm", "-rf", "--", dir)
@@ -239,10 +255,11 @@ func (c *Checker) fingerprint(ctx context.Context) (string, error) {
 	return hex.EncodeToString(sum[:]), nil
 }
 
-// kill runs KillCmd and returns how many processes it found to kill.
-func (c *Checker) kill(ctx context.Context) (int, error) {
+// Kill runs KillCmd and returns how many processes it found to kill. The
+// command is recorded under phase (check, or gate before an export).
+func (c *Checker) Kill(ctx context.Context, phase string) (int, error) {
 	r, err := c.sb.Exec(ctx, KillCmd...)
-	c.rec(trace.PhaseCheck, r)
+	c.rec(phase, r)
 	if err != nil {
 		return 0, fmt.Errorf("kill processes: %w", err)
 	}

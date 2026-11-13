@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/tushar-patel28/agent-proving-ground/internal/budget"
+	"github.com/tushar-patel28/agent-proving-ground/internal/gate"
 	"github.com/tushar-patel28/agent-proving-ground/internal/loop"
 	"github.com/tushar-patel28/agent-proving-ground/internal/sandbox"
 	"github.com/tushar-patel28/agent-proving-ground/internal/stop"
@@ -38,12 +39,14 @@ const maxReplyTokens = 4096
 const (
 	setupTimeout = 5 * time.Minute // start the pod, copy the repo in
 	checkTimeout = 3 * time.Minute // copy in and run the hidden check
+	gateTimeout  = 2 * time.Minute // each diff build for the gate (the person's think time has no limit)
 	stopTimeout  = time.Minute     // delete the pod
 )
 
-const usage = `usage: apg run <task> [--no-agent] [--tasks dir] [--traces dir]
+const usage = `usage: apg run <task> [--no-agent] [--tasks dir] [--traces dir] [--out dir]
   <task> is the task number, e.g. 001
-  --no-agent runs only the hidden check`
+  --no-agent runs only the hidden check
+  --out is where the human gate writes patches (default out/)`
 
 // Process exit codes.
 const (
@@ -88,15 +91,22 @@ func run(args []string, stdout, stderr io.Writer) int {
 	if !opts.noAgent {
 		client = loop.NewAnthropicClient()
 	}
-	tr := runTask(ctx, sb, sb.PodName(), tk, client)
+	// The human gate. It prompts on stderr, so stdout keeps only the result
+	// line. Without a terminal on stdin it always defers.
+	g := &gate.Config{In: os.Stdin, Out: stderr, Interactive: stdinIsTerminal(), OutDir: opts.outDir}
+	tr := runTask(ctx, sb, sb.PodName(), tk, client, g)
 
 	path, err := trace.Write(opts.tracesDir, tr)
 	if err != nil {
 		fmt.Fprintf(stderr, "apg run: write trace: %v\n", err)
 		path = "<not written>"
 	}
-	fmt.Fprintf(stdout, "%s  %s  steps=%d  reason=%s  trace=%s\n",
-		tk.Short, tr.Verdict, len(tr.Steps), tr.ExitReason, path)
+	decision := "none"
+	if tr.Gate != nil {
+		decision = tr.Gate.Decision
+	}
+	fmt.Fprintf(stdout, "%s  %s  steps=%d  reason=%s  gate=%s  trace=%s\n",
+		tk.Short, tr.Verdict, len(tr.Steps), tr.ExitReason, decision, path)
 	if tr.Error != "" {
 		fmt.Fprintf(stderr, "apg run: %s\n", tr.Error)
 	}
@@ -116,6 +126,7 @@ type runOpts struct {
 	noAgent   bool
 	tasksDir  string
 	tracesDir string
+	outDir    string
 }
 
 // parseRunArgs accepts flags before or after the task number.
@@ -126,6 +137,7 @@ func parseRunArgs(args []string) (runOpts, error) {
 	fs.BoolVar(&o.noAgent, "no-agent", false, "run only the check")
 	fs.StringVar(&o.tasksDir, "tasks", "tasks", "tasks directory")
 	fs.StringVar(&o.tracesDir, "traces", "traces", "traces directory")
+	fs.StringVar(&o.outDir, "out", "out", "gate output directory")
 
 	// flag.Parse stops at the first non-flag argument ("001"). So: parse,
 	// take one positional argument, and parse again on what follows, until
@@ -276,7 +288,11 @@ func findTask(tasksDir, short string) (task, error) {
 // check. So when the agent's deadline passes, only the agent's context is
 // done; the check still runs, and Stop, which uses a fresh context of its
 // own, still deletes the pod.
-func runTask(ctx context.Context, sb sandbox.Sandbox, pod string, tk task, client loop.Client) *trace.Trace {
+//
+// After the verdict, while the pod is still alive, the human gate runs (if
+// g is not nil and the harness did not fail): it is the only way a change
+// leaves the sandbox.
+func runTask(ctx context.Context, sb sandbox.Sandbox, pod string, tk task, client loop.Client, g *gate.Config) *trace.Trace {
 	start := time.Now().UTC()
 	tr := &trace.Trace{
 		SchemaVersion: trace.SchemaVersion,
@@ -330,17 +346,6 @@ func runTask(ctx context.Context, sb sandbox.Sandbox, pod string, tk task, clien
 	}()
 	tr.CheckRuns = checker.Runs
 
-	// Stop always runs, with a fresh context: ctx may have been cancelled by
-	// Ctrl-C, and a phase may have timed out. A failed Stop is recorded but
-	// does not change the verdict (the pod also deletes itself after an hour).
-	stopCtx, cancel := context.WithTimeout(context.Background(), stopTimeout)
-	defer cancel()
-	r, stopErr := sb.Stop(stopCtx)
-	rec(trace.PhaseStop, r)
-	if stopErr != nil {
-		fmt.Fprintf(os.Stderr, "apg run: warning: stop %s: %v\n", pod, stopErr)
-	}
-
 	// The exit reason says why the run stopped; the verdict is the check's
 	// result, whatever stopped the loop (D11). After a harness error the
 	// check did not run, so the verdict is FAIL.
@@ -358,6 +363,29 @@ func runTask(ctx context.Context, sb sandbox.Sandbox, pod string, tk task, clien
 		if loopExit != "" {
 			tr.ExitReason = loopExit
 		}
+	}
+
+	// The human gate, while the pod is still alive. Its outcome goes in
+	// tr.Gate only; exit_reason stays the loop's (D23).
+	if g != nil {
+		if err != nil {
+			tr.Gate = &trace.Gate{Decision: gate.DecisionSkipped, Reason: "the run failed (harness error): nothing is exported", Shown: []string{}, DecidedAt: time.Now().UTC()}
+		} else {
+			sum := gate.Summary{CheckRan: tr.Check.Ran, CheckExit: tr.Check.ExitCode, Verdict: tr.Verdict, ExitReason: tr.ExitReason}
+			rg := gate.Run(ctx, *g, tr.RunID, sum, buildDiff(sb, tk, checker, rec))
+			tr.Gate = &rg
+		}
+	}
+
+	// Stop always runs, with a fresh context: ctx may have been cancelled by
+	// Ctrl-C, and a phase may have timed out. A failed Stop is recorded but
+	// does not change the verdict (the pod also deletes itself after an hour).
+	stopCtx, cancel := context.WithTimeout(context.Background(), stopTimeout)
+	defer cancel()
+	r, stopErr := sb.Stop(stopCtx)
+	rec(trace.PhaseStop, r)
+	if stopErr != nil {
+		fmt.Fprintf(os.Stderr, "apg run: warning: stop %s: %v\n", pod, stopErr)
 	}
 	tr.EndedAt = time.Now().UTC()
 	return tr
@@ -432,4 +460,41 @@ func setup(ctx context.Context, sb sandbox.Sandbox, tk task, rec func(string, ..
 		return fmt.Errorf("workspace empty after copy (exit %d, err %v)", r.ExitCode, err)
 	}
 	return nil
+}
+
+// buildDiff returns the gate's diff builder for this run: kill whatever is
+// still running in the pod, copy /workspace out to a fresh host temp dir,
+// and diff it against the task's original repo. The gate calls it twice
+// for an approval: once to show the diff, once more just before export.
+func buildDiff(sb sandbox.Sandbox, tk task, checker *stop.Checker, rec func(string, ...sandbox.Result)) gate.BuildFunc {
+	return func(ctx context.Context) ([]byte, error) {
+		ctx, cancel := context.WithTimeout(ctx, gateTimeout)
+		defer cancel()
+		if _, err := checker.Kill(ctx, trace.PhaseGate); err != nil {
+			return nil, err
+		}
+		tmp, err := os.MkdirTemp("", "apg-gate-*")
+		if err != nil {
+			return nil, err
+		}
+		defer os.RemoveAll(tmp) // the copy is only needed to build the diff
+		// kubectl cp to a path that does not exist yet creates it with
+		// /workspace's contents. The content is untrusted: kubectl cp
+		// refuses archive paths that would land outside it.
+		ws := filepath.Join(tmp, "ws")
+		r, err := sb.CopyOut(ctx, "/workspace", ws)
+		rec(trace.PhaseGate, r)
+		if err != nil {
+			return nil, fmt.Errorf("copy /workspace out: %w", err)
+		}
+		return gate.Diff(tk.Repo, ws)
+	}
+}
+
+// stdinIsTerminal reports whether stdin is a terminal (a character
+// device), using only the standard library. A pipe, a file, or /dev/null
+// is not, and then the gate defers.
+func stdinIsTerminal() bool {
+	fi, err := os.Stdin.Stat()
+	return err == nil && fi.Mode()&os.ModeCharDevice != 0
 }

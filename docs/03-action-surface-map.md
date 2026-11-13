@@ -1,8 +1,8 @@
 # 03 — Action surface map
 
 Drafted by Claude Code, reviewed by Tushar
-Date: Nov 13, 2026 (updated for T2.3 the same day)
-Status: T2.1 draft, with T2.3's stop condition. T6.2 finishes this doc (gates, export path).
+Date: Nov 13, 2026 (updated for T2.3 and T2.4 the same day)
+Status: T2.1 draft, with T2.3's stop condition and T2.4's gate. T6.2 finishes this doc and docs/05-gates.md.
 
 This lists every action the agent can take, what the permission policy (`internal/policy`) checks before the action runs, and what the policy cannot stop. Every tool call goes through `policy.Check` before it runs. A denied call is never executed. It is written into the trace as a step with `verdict: "denied"`, the `rule`, and the `reason`, and the model gets that reason as an error result.
 
@@ -65,6 +65,28 @@ Arguments that are not path-checked, by design:
 
 The sed script check (`internal/policy/sed.go`) is an allowlist parser. It denies any command it does not recognise, and it scans scripts the same way GNU sed does (only a backslash escapes the delimiter). sed also always runs with `--sandbox`, so GNU sed itself refuses `e`, `r` and `w`. On Nov 13, 2026, `sed --sandbox` in `apg-sandbox:dev` (GNU sed 4.9) refused both `s/x/y/w /tmp/g` and `1e id` with "e/r/w commands disabled in sandbox mode".
 
+## The export path: the human gate
+
+The agent's changes leave the sandbox only through the human gate (`internal/gate`, T2.4). No agent tool reaches it: the loop offers only `read_file`, `write_file` and `run_command`, and neither `internal/loop` nor `internal/policy` imports the gate (both are tested).
+1. After the verdict, while the pod is still alive, the harness kills leftover processes, copies `/workspace` out, and diffs it against the task's original repo. The diff leaves out `__pycache__` and `.pytest_cache`.
+2. It shows the approver the full diff, the check result and exit code, the exit reason, and the first 12 characters of the diff's SHA-256.
+3. The SHA-256 of the exact bytes shown is recorded. Before an approved patch is written, the diff is rebuilt from the pod. A different hash, or a failed rebuild, voids the approval, and nothing is exported.
+4. The outcomes:
+   - **approve:** writes `out/<run_id>/approved.patch`
+   - **refuse:** writes nothing
+   - **defer:** writes `pending.patch` and its hash
+   - **empty diff:** skips the gate
+   - **stdin not a terminal:** always defers, so nothing is exported unattended
+5. The gate's outcome is in the trace's `gate` section. `exit_reason` stays the loop's (D23).
+
+Two real runs on Nov 13, 2026: the gate was answered by Claude Code through a pseudo-terminal (`script`), on Tushar's instruction. Tushar did not read these diffs before the answer.
+- **Approve:** `evidence/traces/20261113T222626Z-2f2b40ec.json`. The rebuilt diff's hash matched, and the patch is in `evidence/patches/`.
+- **Refuse:** `evidence/traces/20261113T222801Z-3922d73c.json`. Nothing was written.
+
+Not checked:
+- Symlinks and file modes travel as notes or not at all: a symlink becomes one `Symlink …` line, and the executable bit is not in the patch.
+- A pod older than its one-hour deadline is gone, so a late approval fails the rebuild and is void.
+
 ## What the policy cannot stop
 
 **python and pytest run arbitrary code.** Both are on the allowlist, and both run code the agent controls: `python -c`, a script, a test file, a `conftest.py`, any imported module. That code runs as the pod's user (uid 1000). It can read outside `/workspace`, create symlinks, delete files, and start other programs. The policy sees only the command line. The seeded run shows this: `python -c` created a symlink `etc-link → /etc` and read `/etc/hostname`, and both calls were allowed. So the policy makes the allowlist meaningful for the other nine programs and for the file tools, and it records every decision. **It is not the security boundary. The pod's isolation is the outer boundary.**
@@ -82,7 +104,7 @@ Further gaps the policy has and that nothing tests yet:
   4. delete the directory
 
   All of this happens before the agent's next step, so no agent process is alive while the check exists. A seeded run on kind showed this: the agent left a "tamperer" running that kept overwriting any check it found with `exit 0`. The kill removed it before the check was copied in, the check failed honestly, and python found no check directory at the next step. The model is told only `The task is not complete yet.`, never the check's output.
-- **The agent's code runs inside the check.** pytest imports the package under test, so that code could read the check while it runs and copy it into `/workspace`. Each check run records `changed_workspace`, but nothing prevents the copy short of running the check as another user. `check.sh` runs python with `-B` so the check itself writes no `__pycache__` files into `/workspace`. Without it, `-I` ignored the image's `PYTHONDONTWRITEBYTECODE`, and every check left `.pyc` files the agent could see (found in T2.3). Not checked: a `.pyc` the agent plants in `__pycache__` could still be loaded by the check in place of the source.
+- **The agent's code runs inside the check.** pytest imports the package under test, so that code could read the check while it runs and copy it into `/workspace`. Each check run records `changed_workspace`, but nothing prevents the copy short of running the check as another user. `check.sh` runs python with `-B` so the check itself writes no `__pycache__` files into `/workspace`. Without it, `-I` ignored the image's `PYTHONDONTWRITEBYTECODE`, and every check left `.pyc` files the agent could see (found in T2.3). Since T2.4 every check run also deletes every `__pycache__` in `/workspace` after the kill and before the check, so a `.pyc` the agent planted there cannot stand in for the source. The fingerprint and the gate's diff ignore `__pycache__` and `.pytest_cache`. Not checked: a bare `.pyc` with no `.py` next to it (for example `calc/ops.pyc` after deleting `ops.py`) can still be imported by Python's sourceless loader.
 - **What the fingerprint sees.** It covers the sha256 of every regular file (`find /workspace -type f -exec sha256sum`). A step that only adds a symlink or an empty directory does not count as a change and runs no check. The final check still runs.
 - **Kill limits.** The kill loop makes 20 passes of `kill(-1, SIGKILL)`. A process that forks faster than that could survive, and the run then ends as a harness error rather than running the check.
 - **The test file is writable on purpose.** `tests/test_ops.py` is inside `/workspace`, so `write_file` may change it. The check's SHA-256 of the test file catches that (`check.sh`, T1.1). This is the Phase 6 controlled failure (premortem P1), so the policy must not hide it.

@@ -15,7 +15,7 @@ Build plan for Tushar Patel's INFO7375 final project. Every chat in this Project
 ## Current status
 
 - **Phase:** 2 — The full agentic loop
-- **Next task:** T2.4
+- **Next task:** T2.5
 - **Last updated:** Nov 13, 2026
 
 ---
@@ -163,7 +163,13 @@ Goal: one task, one kind pod, one trace file, one PASS/FAIL line.
 2. If the agent says it is done, that only triggers the check. The model's word is never the verdict.
 - **Done when:** a test shows that an agent saying "done" with a failing check does not produce PASS.
 
-**T2.4 Human gate**
+**T2.4 Human gate** ✅ Done Nov 13:
+- **Tests first:** `internal/gate/gate_test.go` and `cmd/apg/gate_test.go` were committed before `internal/gate` (commit 38c30d2).
+- **The gate:** after the verdict, with the pod alive, it kills leftover processes, copies /workspace out, and diffs it against the task repo, leaving out `__pycache__` and `.pytest_cache`. It shows the approver the diff, the check result and exit code, the exit reason, and the hash prefix, then asks approve / refuse / defer. It binds the decision to the SHA-256 of the bytes shown and rebuilds the diff before export (a mismatch is void). Without a terminal on stdin it defers.
+- **T2.3 follow-up:** each check run deletes `__pycache__` after the kill, and the fingerprint ignores the caches.
+- **Real runs** with `claude-haiku-5-5` (gate answered by Claude Code through a pty on Tushar's instruction):
+  - `001  PASS  steps=4  reason=check_passed  gate=approved` (evidence/traces/20261113T222626Z-2f2b40ec.json). The rebuild hash matched; the patch is in evidence/patches/20261113T222626Z-2f2b40ec.approved.patch, and `git apply --check` passed on a copy of the task repo.
+  - `gate=refused` (evidence/traces/20261113T222801Z-3922d73c.json): nothing written.
 1. `internal/gate/gate.go`: before any change leaves the sandbox, show the diff and the check output, then ask approve / refuse / defer.
 2. Record the SHA-256 of the exact diff shown. If the diff changes, the approval is void.
 3. In batch mode (`apg eval`), the gate always defers. Nothing is exported unattended.
@@ -323,6 +329,7 @@ Goal: one task, one kind pod, one trace file, one PASS/FAIL line.
 | D20 | Nov 13 | run_command takes an argv list and runs with no shell (`timeout 60 <argv>`), so the program allowlist means something; symlinks are caught by running `realpath -m` in the pod before a call runs; sed always gets `--sandbox`; the pod sets `workingDir: /workspace`. python/pytest still run arbitrary code: the pod is the boundary (docs/03) | Decided |
 | D21 | Nov 13 | Budget exits: the exit reason says why the loop stopped and the verdict is still the check's result (PASS with `budget_steps` is possible); the timeout covers the agent loop only (setup, check and stop have fixed harness limits, so the check and pod cleanup run after a timeout); a step starts only if `count_tokens` input + the full per-reply max_tokens fits the token and cost limits; Ctrl-C is `error`, not `timeout` | Decided |
 | D22 | Nov 13 | Stop condition: the check runs after any step that changes /workspace (sha256 fingerprint of every regular file, taken by the harness), and a pass stops the run; the model hears only "The task is not complete yet."; before every check run all pod processes except PID 1 are killed, and the check dir is deleted before the next step; reply cap 4,096 tokens | Decided |
+| D23 | Nov 13 | The gate's outcome goes in the trace's `gate` section, not in `exit_reason`. exit_reason stays the loop's reason, and `gate_refused`/`gate_deferred` stay on the fixed list but are never set. Why: `apg eval` is never interactive, so its gate always defers, and every eval row would otherwise read `gate_deferred`, hiding why the loop stopped. The gate is bound to the SHA-256 of the exact diff shown, and the diff is rebuilt from the pod before export | Decided |
 
 ---
 

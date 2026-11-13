@@ -38,8 +38,8 @@ const (
 	ReasonBudgetCost           ExitReason = "budget_cost"
 	ReasonTimeout              ExitReason = "timeout"
 	ReasonPolicyViolationLimit ExitReason = "policy_violation_limit"
-	ReasonGateRefused          ExitReason = "gate_refused"  // reserved for the human gate (T2.4); not used yet
-	ReasonGateDeferred         ExitReason = "gate_deferred" // reserved for the human gate (T2.4); not used yet
+	ReasonGateRefused          ExitReason = "gate_refused"  // on the fixed list, never set: the gate's outcome is in Trace.Gate (D23)
+	ReasonGateDeferred         ExitReason = "gate_deferred" // on the fixed list, never set: the gate's outcome is in Trace.Gate (D23)
 	ReasonError                ExitReason = "error"         // the harness failed; the check did not run
 )
 
@@ -87,6 +87,22 @@ type Trace struct {
 	TotalOutputTokens int64   `json:"total_output_tokens,omitempty"`
 	EstimatedCostUSD  float64 `json:"estimated_cost_usd,omitempty"` // from list prices; not a bill
 	Budget            *Budget `json:"budget,omitempty"`             // pointer: nil (omitted) without an agent
+
+	Gate *Gate `json:"gate,omitempty"` // the human gate (T2.4); nil when no gate ran
+}
+
+// Gate is the human gate's record: what was shown, what was decided, and
+// what (if anything) left the sandbox.
+type Gate struct {
+	Decision      string    `json:"decision"`                 // approved | refused | deferred | skipped | void | error
+	Reason        string    `json:"reason,omitempty"`         // why, for skipped / void / error
+	Interactive   bool      `json:"interactive"`              // stdin was a terminal
+	Shown         []string  `json:"shown"`                    // what the approver saw; empty when nothing was shown
+	DiffSHA256    string    `json:"diff_sha256,omitempty"`    // SHA-256 of the exact diff bytes shown (or written, when deferred)
+	DiffBytes     int       `json:"diff_bytes"`               // length of that diff
+	RecheckSHA256 string    `json:"recheck_sha256,omitempty"` // the diff rebuilt from the pod before export; must equal diff_sha256
+	DecidedAt     time.Time `json:"decided_at"`
+	ExportedPath  string    `json:"exported_path,omitempty"` // approved.patch or pending.patch; empty when nothing left
 }
 
 // Check is the hidden check's outcome. It runs after every exit except
@@ -186,6 +202,7 @@ const (
 	PhaseAgent = "agent" // commands run by the agent's tool calls
 
 	PhaseFingerprint = "fingerprint" // the harness hashing /workspace after a step
+	PhaseGate        = "gate"        // the human gate: kill, copy /workspace out (T2.4)
 	PhaseCheck       = "check"
 	PhaseStop        = "stop"
 )

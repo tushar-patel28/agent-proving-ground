@@ -85,7 +85,7 @@ func TestKillFailures(t *testing.T) {
 			t.Errorf("kill output %q: err = %v, want a kill error", out, err)
 		}
 	}
-	n, err := New(&fakePod{kill: `{"killed": [{"pid": 7, "cmd": "sleep 300"}, {"pid": 9, "cmd": "y"}], "left": 0}`}, "c", noRec).kill(context.Background())
+	n, err := New(&fakePod{kill: `{"killed": [{"pid": 7, "cmd": "sleep 300"}, {"pid": 9, "cmd": "y"}], "left": 0}`}, "c", noRec).Kill(context.Background(), "check")
 	if err != nil || n != 2 {
 		t.Errorf("kill = %d, %v; want 2, nil", n, err)
 	}
