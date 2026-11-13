@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/tushar-patel28/agent-proving-ground/internal/budget"
-	"github.com/tushar-patel28/agent-proving-ground/internal/sandbox"
 )
 
 func TestParseRunArgs(t *testing.T) {
@@ -141,21 +140,5 @@ func TestFindTaskRejectsIncompleteContracts(t *testing.T) {
 				t.Error("incomplete contract should be rejected")
 			}
 		})
-	}
-}
-
-func TestRemoteExit(t *testing.T) {
-	ok := []sandbox.Result{
-		{ExitCode: 0},
-		{ExitCode: 1, Stderr: "command terminated with exit code 1\n"},
-	}
-	for _, r := range ok {
-		if err := remoteExit(r); err != nil {
-			t.Errorf("%+v: unexpected error %v", r, err)
-		}
-	}
-	gone := sandbox.Result{ExitCode: 1, Stderr: `Error from server (NotFound): pods "apg-x" not found`}
-	if err := remoteExit(gone); err == nil {
-		t.Error("a kubectl failure must not count as the check's exit code")
 	}
 }

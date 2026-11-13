@@ -15,7 +15,7 @@ Build plan for Tushar Patel's INFO7375 final project. Every chat in this Project
 ## Current status
 
 - **Phase:** 2 — The full agentic loop
-- **Next task:** T2.3
+- **Next task:** T2.4
 - **Last updated:** Nov 13, 2026
 
 ---
@@ -152,7 +152,13 @@ Goal: one task, one kind pod, one trace file, one PASS/FAIL line.
 2. Exit reasons as a fixed list: `check_passed`, `check_failed`, `budget_steps`, `budget_tokens`, `budget_cost`, `timeout`, `policy_violation_limit`, `gate_refused`, `gate_deferred`, `error`.
 - **Done when:** a test forces each budget exit.
 
-**T2.3 Stop condition**
+**T2.3 Stop condition** ✅ Done Nov 13:
+- **Tests first:** `cmd/apg/stop_test.go` and `stop_kind_test.go` were committed before `internal/stop` (commit bf07b04).
+- **Stop condition:** after every step the harness fingerprints /workspace. If it changed, it kills every pod process except PID 1, then runs the check, kills again, and deletes the check dir before the next step. A pass stops the run. A failure tells the model only `The task is not complete yet.` end_turn only triggers the final check.
+- **Reply cap:** 4,096 tokens.
+- **check.sh:** now runs python with `-B`, because `-I` had ignored PYTHONDONTWRITEBYTECODE and the mid-run check left `__pycache__` files in /workspace.
+- **Seeded kind run** (tamperer; evidence/traces/20261113T213318Z-f1a52be8.json): the tamperer was killed before the mid-run check, the check failed honestly, python found no check dir at the next step, and the run ended `FAIL check_failed`.
+- **Model run:** `apg run 001` with `claude-haiku-5-5` printed `001  PASS  steps=4  reason=check_passed`. The mid-run check after step 4 (`write_file`) passed and the loop stopped; 5,659 tokens, est. $0.00074 (evidence/traces/20261113T213336Z-b806fc06.json).
 1. `internal/stop/stop.go`: after each write action, the harness runs the hidden check. PASS stops the run.
 2. If the agent says it is done, that only triggers the check. The model's word is never the verdict.
 - **Done when:** a test shows that an agent saying "done" with a failing check does not produce PASS.
@@ -316,6 +322,7 @@ Goal: one task, one kind pod, one trace file, one PASS/FAIL line.
 | D19 | Nov 11 | kindnet enforces NetworkPolicy ~1–2 s after Ready; Start probes until egress is blocked (30 s limit, fail and delete pod), probes recorded with Start's commands | Decided |
 | D20 | Nov 13 | run_command takes an argv list and runs with no shell (`timeout 60 <argv>`), so the program allowlist means something; symlinks are caught by running `realpath -m` in the pod before a call runs; sed always gets `--sandbox`; the pod sets `workingDir: /workspace`. python/pytest still run arbitrary code: the pod is the boundary (docs/03) | Decided |
 | D21 | Nov 13 | Budget exits: the exit reason says why the loop stopped and the verdict is still the check's result (PASS with `budget_steps` is possible); the timeout covers the agent loop only (setup, check and stop have fixed harness limits, so the check and pod cleanup run after a timeout); a step starts only if `count_tokens` input + the full per-reply max_tokens fits the token and cost limits; Ctrl-C is `error`, not `timeout` | Decided |
+| D22 | Nov 13 | Stop condition: the check runs after any step that changes /workspace (sha256 fingerprint of every regular file, taken by the harness), and a pass stops the run; the model hears only "The task is not complete yet."; before every check run all pod processes except PID 1 are killed, and the check dir is deleted before the next step; reply cap 4,096 tokens | Decided |
 
 ---
 

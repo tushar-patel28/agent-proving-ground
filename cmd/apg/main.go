@@ -6,10 +6,7 @@ package main
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -22,8 +19,8 @@ import (
 
 	"github.com/tushar-patel28/agent-proving-ground/internal/budget"
 	"github.com/tushar-patel28/agent-proving-ground/internal/loop"
-	"github.com/tushar-patel28/agent-proving-ground/internal/policy"
 	"github.com/tushar-patel28/agent-proving-ground/internal/sandbox"
+	"github.com/tushar-patel28/agent-proving-ground/internal/stop"
 	"github.com/tushar-patel28/agent-proving-ground/internal/trace"
 )
 
@@ -31,8 +28,9 @@ import (
 const model = "claude-haiku-5-5"
 
 // maxReplyTokens caps each model reply. The budget check assumes every
-// reply could use all of it.
-const maxReplyTokens = 16000
+// reply could use all of it. (16,000 until T2.3; task 001's longest reply
+// so far was 304 tokens.)
+const maxReplyTokens = 4096
 
 // Time limits for the harness's own steps. The agent's limit comes from
 // the contract (timeout_seconds); these are separate so that the check and
@@ -295,7 +293,11 @@ func runTask(ctx context.Context, sb sandbox.Sandbox, pod string, tk task, clien
 		}
 	}
 
-	var loopExit trace.ExitReason // set when a limit stopped the agent loop
+	// The stop condition (internal/stop): it fingerprints /workspace after
+	// every agent step and runs the hidden check when something changed.
+	checker := stop.New(sb, tk.Check, rec)
+
+	var loopExit trace.ExitReason // set when a limit or a mid-run pass stopped the agent loop
 	checkExit, err := func() (int, error) {
 		// A func literal called at once: its defers (the cancels) run when
 		// it returns, before Stop below.
@@ -304,21 +306,29 @@ func runTask(ctx context.Context, sb sandbox.Sandbox, pod string, tk task, clien
 		if err := setup(setupCtx, sb, tk, rec); err != nil {
 			return 0, err
 		}
+		if err := checker.Baseline(setupCtx); err != nil {
+			return 0, fmt.Errorf("setup: %w", err)
+		}
 
 		if client != nil {
 			var err error
-			loopExit, err = runAgent(ctx, sb, tk, client, rec, tr)
+			loopExit, err = runAgent(ctx, sb, tk, client, checker, rec, tr)
 			if err != nil {
 				return 0, fmt.Errorf("agent: %w", err)
 			}
 		}
+		if loopExit == trace.ReasonCheckPassed {
+			// A step made the check pass; that run is the verdict.
+			return 0, nil
+		}
 
-		// The check gets its own context from ctx, not the agent's (which
-		// may have timed out).
+		// The final check, after every other exit. It gets its own context
+		// from ctx, not the agent's (which may have timed out).
 		checkCtx, cancel := context.WithTimeout(ctx, checkTimeout)
 		defer cancel()
-		return runCheck(checkCtx, sb, tk, rec)
+		return checker.Run(checkCtx, trace.TriggerFinal, 0)
 	}()
+	tr.CheckRuns = checker.Runs
 
 	// Stop always runs, with a fresh context: ctx may have been cancelled by
 	// Ctrl-C, and a phase may have timed out. A failed Stop is recorded but
@@ -354,15 +364,17 @@ func runTask(ctx context.Context, sb sandbox.Sandbox, pod string, tk task, clien
 }
 
 // runAgent runs the agent loop under the contract's timeout and fills in
-// the agent fields of tr. It returns the limit that stopped the loop ("" if
-// none) or a harness error.
-func runAgent(ctx context.Context, sb sandbox.Sandbox, tk task, client loop.Client, rec func(string, ...sandbox.Result), tr *trace.Trace) (trace.ExitReason, error) {
+// the agent fields of tr. It returns what stopped the loop early (a limit,
+// or check_passed from a mid-run check; "" if the model ended its turn) or
+// a harness error.
+func runAgent(ctx context.Context, sb sandbox.Sandbox, tk task, client loop.Client, checker *stop.Checker, rec func(string, ...sandbox.Result), tr *trace.Trace) (trace.ExitReason, error) {
 	cfg := loop.Config{
 		Model:     model,
 		Goal:      tk.Goal,
 		Tools:     tk.AllowedTools,
 		Limits:    tk.Limits,
 		MaxTokens: maxReplyTokens,
+		Stop:      checker,
 	}
 	// The wall-clock budget: agentCtx is done when Timeout passes (or when
 	// ctx is cancelled). cancel frees its timer if the loop ends early.
@@ -420,50 +432,4 @@ func setup(ctx context.Context, sb sandbox.Sandbox, tk task, rec func(string, ..
 		return fmt.Errorf("workspace empty after copy (exit %d, err %v)", r.ExitCode, err)
 	}
 	return nil
-}
-
-// runCheck copies the hidden check in and runs it. It returns the check's
-// exit code, or an error if the harness itself failed (so a broken run is
-// never reported as check_failed).
-func runCheck(ctx context.Context, sb sandbox.Sandbox, tk task, rec func(string, ...sandbox.Result)) (int, error) {
-	// Check: copied in only now, after setup and the agent, into a
-	// directory with a random name so nothing can be planted there in
-	// advance. Known gap: a process the agent left running could still find
-	// and change it before it runs (T2.3). The name starts with
-	// policy.CheckDirPrefix, which the policy's rule 3 denies.
-	b := make([]byte, 8)
-	if _, err := rand.Read(b); err != nil {
-		return 0, err
-	}
-	checkDir := policy.CheckDirPrefix + hex.EncodeToString(b)
-	r, err := sb.Exec(ctx, "mkdir", "-m", "700", checkDir)
-	rec(trace.PhaseCheck, r)
-	if err != nil || r.ExitCode != 0 {
-		return 0, fmt.Errorf("mkdir %s (exit %d, err %v)", checkDir, r.ExitCode, err)
-	}
-	r, err = sb.CopyIn(ctx, tk.Check, checkDir+"/check.sh")
-	rec(trace.PhaseCheck, r)
-	if err != nil {
-		return 0, fmt.Errorf("copy check: %w", err)
-	}
-	r, err = sb.Exec(ctx, "bash", checkDir+"/check.sh")
-	rec(trace.PhaseCheck, r)
-	if err != nil {
-		return 0, fmt.Errorf("run check: %w", err)
-	}
-	if err := remoteExit(r); err != nil {
-		return 0, fmt.Errorf("run check: %w", err)
-	}
-	return r.ExitCode, nil
-}
-
-// remoteExit tells a non-zero exit from the check apart from kubectl
-// failing (for example, the pod is gone). When the command in the pod exits
-// non-zero, kubectl exec prints "command terminated with exit code N" on
-// stderr; any other non-zero exit is kubectl's own failure.
-func remoteExit(r sandbox.Result) error {
-	if r.ExitCode == 0 || strings.Contains(r.Stderr, "command terminated with exit code") {
-		return nil
-	}
-	return errors.New("kubectl exec failed: " + strings.TrimSpace(r.Stderr))
 }

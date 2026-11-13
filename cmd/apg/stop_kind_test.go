@@ -109,6 +109,13 @@ func TestCheckHiddenOnKind(t *testing.T) {
 	if mid.AfterStep != 2 || mid.Trigger != trace.TriggerWorkspaceChanged || mid.Passed || mid.Killed < 1 {
 		t.Errorf("mid-run check = %+v, want after step 2, failed, killed >= 1", mid)
 	}
+	// The check leaves nothing behind in /workspace (check.sh runs python
+	// with -B, so no __pycache__ files).
+	for _, r := range tr.CheckRuns {
+		if r.ChangedWorkspace {
+			t.Errorf("check run %+v changed /workspace", r)
+		}
+	}
 	// Step 3: no check directory between steps.
 	if !strings.Contains(tr.Steps[2].Output, "[]") {
 		t.Errorf("step 3 found a check dir: %q", tr.Steps[2].Output)

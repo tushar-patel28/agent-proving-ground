@@ -4,7 +4,8 @@
 //
 // The rule: a model call starts only if its worst case fits. Before each
 // call the loop asks the API how many input tokens the next request has
-// (count_tokens), and assumes the reply uses the full per-reply max_tokens.
+// (count_tokens), and assumes the reply uses the full per-reply max_tokens
+// (4,096 since T2.3).
 // If that worst case would pass the token or cost limit, the run stops
 // instead. Actual usage is added after each call; if count_tokens was ever
 // low and the total went over, the next check stops the run, and the trace
@@ -88,9 +89,17 @@ type Price struct {
 	LongOver        int64
 }
 
-// Prices are list prices from the Claude API pricing table (cached Nov 3,
-// 2026). This is the only place prices live. The estimate ignores prompt
-// caching (not used) and taxes; it is not a bill.
+// Prices are list prices, USD per million tokens. This is the only place
+// prices live.
+//
+// Source: Anthropic's Claude API pricing page,
+// https://platform.claude.com/docs/en/about-claude/pricing.md, as listed
+// in Claude Code's claude-api reference (model table "cached: 2026-11-03")
+// on Nov 3, 2026: Claude Haiku 5.5 $0.10 input / $0.50 output, and
+// $0.50 / $2.50 for prompts over 100K tokens. Not re-checked against the
+// live page since; check it before relying on these numbers.
+//
+// The estimate ignores prompt caching (not used) and taxes; it is not a bill.
 var Prices = map[string]Price{
 	"claude-haiku-5-5": {In: 0.10, Out: 0.50, InLong: 0.50, OutLong: 2.50, LongOver: 100_000},
 }

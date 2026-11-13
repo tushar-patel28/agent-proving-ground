@@ -27,6 +27,7 @@ import (
 	"github.com/tushar-patel28/agent-proving-ground/internal/budget"
 	"github.com/tushar-patel28/agent-proving-ground/internal/policy"
 	"github.com/tushar-patel28/agent-proving-ground/internal/sandbox"
+	"github.com/tushar-patel28/agent-proving-ground/internal/stop"
 	"github.com/tushar-patel28/agent-proving-ground/internal/trace"
 )
 
@@ -36,11 +37,23 @@ const maxOutput = 8 << 10
 
 // Why the loop ended (trace field loop_stop).
 const (
-	StopEndTurn   = "end_turn"   // the model replied without a tool call
-	StopMaxTokens = "max_tokens" // a reply hit the per-reply max_tokens; its tool call (if any) was not run
-	StopRefusal   = "refusal"    // the model declined
-	StopLimit     = "limit"      // a budget, the timeout, or the policy-violation limit; Result.Exit says which
+	StopEndTurn   = "end_turn"     // the model replied without a tool call
+	StopMaxTokens = "max_tokens"   // a reply hit the per-reply max_tokens; its tool call (if any) was not run
+	StopRefusal   = "refusal"      // the model declined
+	StopLimit     = "limit"        // a budget, the timeout, or the policy-violation limit; Result.Exit says which
+	StopCheckPass = "check_passed" // a step changed /workspace and the hidden check passed (T2.3)
 )
+
+// NotCompleteNote is all the model is told after a failed check: not the
+// check's output, exit code, or file names. The check stays hidden.
+const NotCompleteNote = "The task is not complete yet."
+
+// Stopper is the stop condition the harness runs after every step
+// (internal/stop): fingerprint /workspace and, if it changed, run the
+// hidden check.
+type Stopper interface {
+	AfterStep(ctx context.Context, step int) (stop.StepResult, error)
+}
 
 // Client is the model API the loop needs: one message call, and a token
 // count for the budget check before it. The real one wraps the Anthropic
@@ -75,6 +88,7 @@ type Config struct {
 	Tools     []string      // allowed_tools from contract.json
 	Limits    budget.Limits // the run's budget; Limits.Timeout is applied by the caller's ctx
 	MaxTokens int64         // per model reply
+	Stop      Stopper       // run after every step with a tool call; nil means no checks during the run
 }
 
 // Result is what the loop did, for the trace.
@@ -83,10 +97,10 @@ type Result struct {
 	Used             budget.Used
 	CountTokensCalls int
 	Stop             string           // one of the Stop* constants
-	Exit             trace.ExitReason // which limit stopped the loop when Stop is StopLimit; "" otherwise
+	Exit             trace.ExitReason // when Stop is StopLimit, which limit; when StopCheckPass, check_passed; "" otherwise
 }
 
-const systemPrompt = `You are a coding agent. You work inside an isolated Linux container with no network access. The task's repository is at /workspace, which is also the working directory. You can act only through the tools you are given, and file paths must be inside /workspace. Every tool call is checked by a permission policy before it runs; a denied call is not run, and its result says why. Your work is checked independently after you finish. When the task is complete, reply with a short summary and do not call a tool.`
+const systemPrompt = `You are a coding agent. You work inside an isolated Linux container with no network access. The task's repository is at /workspace, which is also the working directory. You can act only through the tools you are given, and file paths must be inside /workspace. Every tool call is checked by a permission policy before it runs; a denied call is not run, and its result says why. Your work is checked independently: after any step that changes /workspace, and when you finish. If a check fails, you are only told that the task is not complete yet. When the task is complete, reply with a short summary and do not call a tool.`
 
 // Run runs the loop. rec is called for every sandbox command a tool runs,
 // so the trace holds every host command. On error, Result still holds the
@@ -253,8 +267,32 @@ func Run(ctx context.Context, client Client, sb sandbox.Sandbox, cfg Config, rec
 		res.Steps = append(res.Steps, step)
 
 		if len(results) == 0 {
+			// The model ended its turn. That is not a verdict: the harness
+			// runs the final check after the loop.
 			res.Stop = StopEndTurn
 			return res, nil
+		}
+
+		// The stop condition, after every step with a tool call (allowed
+		// or denied: something the agent left running may have changed
+		// files either way).
+		if cfg.Stop != nil {
+			sr, err := cfg.Stop.AfterStep(ctx, n)
+			if err != nil {
+				return failed(fmt.Errorf("after step %d: %w", n, err))
+			}
+			// step was appended by value (a copy), so set the field on the
+			// element stored in the slice.
+			res.Steps[len(res.Steps)-1].WorkspaceChanged = sr.Changed
+			if sr.Ran && sr.Passed {
+				res.Stop, res.Exit = StopCheckPass, trace.ReasonCheckPassed
+				return res, nil
+			}
+			if sr.Ran {
+				// A text block after the tool results, in the same user
+				// message. Nothing from the check itself.
+				results = append(results, anthropic.NewTextBlock(NotCompleteNote))
+			}
 		}
 		// Tool results go back as the next user message.
 		messages = append(messages, anthropic.NewUserMessage(results...))

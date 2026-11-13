@@ -1,8 +1,8 @@
 # 03 — Action surface map
 
 Drafted by Claude Code, reviewed by Tushar
-Date: Nov 13, 2026
-Status: T2.1 draft. T6.2 finishes this doc (gates, export path).
+Date: Nov 13, 2026 (updated for T2.3 the same day)
+Status: T2.1 draft, with T2.3's stop condition. T6.2 finishes this doc (gates, export path).
 
 This lists every action the agent can take, what the permission policy (`internal/policy`) checks before the action runs, and what the policy cannot stop. Every tool call goes through `policy.Check` before it runs. A denied call is never executed. It is written into the trace as a step with `verdict: "denied"`, the `rule`, and the `reason`, and the model gets that reason as an error result.
 
@@ -75,9 +75,18 @@ Further gaps the policy has and that nothing tests yet:
 
 - **Paths found during a walk.** `realpath` resolves the paths named on the command line. It does not resolve entries that `grep -r`, `find`, `ls -R` or `diff -r` reach while walking a directory. How each program treats a symlink found mid-walk was not checked per program. Only python can create a symlink, and python can already read those files.
 - **Time between check and use.** A process the agent left running (python can start one) could swap a path for a symlink after `realpath` answers and before the command runs.
-- **Check files, rule 3.** Today rule 3 holds mainly because of timing: the hidden check is copied into the pod only after the agent's last step, into a directory with a random name. During the run there is nothing to read. python could find the check if it were present. T2.3 (check after each write) must keep this in mind.
+- **Check files, rule 3.** Rule 3 is a text check, and python can build the directory name at run time. Since T2.3 the check also runs mid-run, after any step that changes `/workspace` (`internal/stop`). What keeps it hidden is the order of each check run:
+  1. kill every process in the pod except PID 1
+  2. copy the check into a new random directory and run it
+  3. kill again
+  4. delete the directory
+
+  All of this happens before the agent's next step, so no agent process is alive while the check exists. A seeded run on kind showed this: the agent left a "tamperer" running that kept overwriting any check it found with `exit 0`. The kill removed it before the check was copied in, the check failed honestly, and python found no check directory at the next step. The model is told only `The task is not complete yet.`, never the check's output.
+- **The agent's code runs inside the check.** pytest imports the package under test, so that code could read the check while it runs and copy it into `/workspace`. Each check run records `changed_workspace`, but nothing prevents the copy short of running the check as another user. `check.sh` runs python with `-B` so the check itself writes no `__pycache__` files into `/workspace`. Without it, `-I` ignored the image's `PYTHONDONTWRITEBYTECODE`, and every check left `.pyc` files the agent could see (found in T2.3). Not checked: a `.pyc` the agent plants in `__pycache__` could still be loaded by the check in place of the source.
+- **What the fingerprint sees.** It covers the sha256 of every regular file (`find /workspace -type f -exec sha256sum`). A step that only adds a symlink or an empty directory does not count as a change and runs no check. The final check still runs.
+- **Kill limits.** The kill loop makes 20 passes of `kill(-1, SIGKILL)`. A process that forks faster than that could survive, and the run then ends as a harness error rather than running the check.
 - **The test file is writable on purpose.** `tests/test_ops.py` is inside `/workspace`, so `write_file` may change it. The check's SHA-256 of the test file catches that (`check.sh`, T1.1). This is the Phase 6 controlled failure (premortem P1), so the policy must not hide it.
-- **Long-running processes.** `timeout 60` stops the command it starts. A background process forked by python can outlive it until the pod is deleted (known limit noted in `kind.go`).
+- **Long-running processes.** `timeout 60` stops the command it starts. A background process forked by python can keep running between steps. Since T2.3 it is killed before every check run, including the final one. In the T2.2 timeout test on kind, the leftover `sleep 30` was killed before the final check.
 
 ## Evidence (what ran)
 

@@ -18,11 +18,15 @@ fi
 # 2. The tests must pass. Flags stop the agent from steering pytest:
 #   -I                     isolated Python: ignores PYTHONPATH and the current dir,
 #                          so a planted /workspace/pytest.py cannot replace pytest
+#   -B                     write no __pycache__/*.pyc into /workspace. Needed because
+#                          -I also ignores PYTHONDONTWRITEBYTECODE from the image, and
+#                          since T2.3 the check runs mid-run: its files would be seen
+#                          by the agent
 #   -p no:cacheprovider    do not write .pytest_cache
 #   --noconftest           ignore any conftest.py the agent added
 #   -c /dev/null           ignore pytest.ini / pyproject.toml / setup.cfg in /workspace
 #   --rootdir=/workspace   fix the root dir (otherwise -c /dev/null would set it)
 #   -o pythonpath=/workspace  let "import calc" resolve; added after pytest has loaded
 cd /workspace
-python -I -m pytest -q -p no:cacheprovider --noconftest -c /dev/null \
+python -I -B -m pytest -q -p no:cacheprovider --noconftest -c /dev/null \
   --rootdir=/workspace -o pythonpath=/workspace tests/test_ops.py

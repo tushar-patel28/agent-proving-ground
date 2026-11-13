@@ -72,11 +72,12 @@ type Trace struct {
 	Pod           string     `json:"pod"`
 	StartedAt     time.Time  `json:"started_at"` // time.Time encodes as RFC 3339
 	EndedAt       time.Time  `json:"ended_at"`
-	Commands      []Command  `json:"commands"`    // every host command, in order
-	Steps         []Step     `json:"steps"`       // agent steps; empty without an agent
-	ExitReason    ExitReason `json:"exit_reason"` // why the run stopped
-	Verdict       string     `json:"verdict"`     // PASS or FAIL: the check's result
-	Check         Check      `json:"check"`
+	Commands      []Command  `json:"commands"`        // every host command, in order
+	Steps         []Step     `json:"steps"`           // agent steps; empty without an agent
+	ExitReason    ExitReason `json:"exit_reason"`     // why the run stopped
+	Verdict       string     `json:"verdict"`         // PASS or FAIL: the check's result
+	Check         Check      `json:"check"`           // the check that decided the verdict
+	CheckRuns     []CheckRun `json:"check_runs"`      // every time the check ran (T2.3), in order
 	Error         string     `json:"error,omitempty"` // harness error; omitempty drops it when ""
 
 	// Agent fields. omitempty leaves them out of --no-agent traces.
@@ -94,6 +95,24 @@ type Check struct {
 	Ran      bool `json:"ran"`
 	ExitCode *int `json:"exit_code,omitempty"` // nil when it did not run; 0 means PASS
 }
+
+// CheckRun is one run of the hidden check. Its output stays in the
+// commands (phase check); the model never sees it.
+type CheckRun struct {
+	AfterStep        int    `json:"after_step"` // the step that changed /workspace; 0 for the final check
+	Trigger          string `json:"trigger"`    // workspace_changed | final
+	ExitCode         int    `json:"exit_code"`
+	Passed           bool   `json:"passed"`
+	Killed           int    `json:"killed"`            // processes killed before the check ran
+	WorkspaceSHA256  string `json:"workspace_sha256"`  // fingerprint of /workspace the check saw
+	ChangedWorkspace bool   `json:"changed_workspace"` // the check run itself changed /workspace (see internal/stop)
+}
+
+// Check triggers, used in CheckRun.Trigger.
+const (
+	TriggerWorkspaceChanged = "workspace_changed" // a step changed /workspace
+	TriggerFinal            = "final"             // the agent loop ended
+)
 
 // Budget is the run's limits and what it used (T2.2).
 type Budget struct {
@@ -136,19 +155,21 @@ type Command struct {
 // Step is one agent step: one model turn and the (at most one) tool call
 // it made.
 type Step struct {
-	N            int    `json:"n"` // 1-based
-	StopReason   string `json:"stop_reason"`
-	Text         string `json:"text,omitempty"`      // the model's text in this turn, truncated
-	Tool         string `json:"tool,omitempty"`      // empty when the turn made no tool call
-	Input        string `json:"input,omitempty"`     // tool input as raw JSON text, truncated
-	Output       string `json:"output,omitempty"`    // tool result sent back to the model, truncated
-	ExitCode     *int   `json:"exit_code,omitempty"` // pointer: nil (omitted) when nothing ran in the sandbox
-	IsError      bool   `json:"is_error,omitempty"`
-	Verdict      string `json:"verdict,omitempty"` // policy decision on the tool call: allowed | denied; empty when no tool call
-	Rule         string `json:"rule,omitempty"`    // the policy rule that denied it (internal/policy Rule* constants)
-	Reason       string `json:"reason,omitempty"`  // why it was denied; the same text the model was sent
-	InputTokens  int64  `json:"input_tokens"`
-	OutputTokens int64  `json:"output_tokens"` // includes thinking tokens
+	N          int    `json:"n"` // 1-based
+	StopReason string `json:"stop_reason"`
+	Text       string `json:"text,omitempty"`      // the model's text in this turn, truncated
+	Tool       string `json:"tool,omitempty"`      // empty when the turn made no tool call
+	Input      string `json:"input,omitempty"`     // tool input as raw JSON text, truncated
+	Output     string `json:"output,omitempty"`    // tool result sent back to the model, truncated
+	ExitCode   *int   `json:"exit_code,omitempty"` // pointer: nil (omitted) when nothing ran in the sandbox
+	IsError    bool   `json:"is_error,omitempty"`
+	Verdict    string `json:"verdict,omitempty"` // policy decision on the tool call: allowed | denied; empty when no tool call
+	Rule       string `json:"rule,omitempty"`    // the policy rule that denied it (internal/policy Rule* constants)
+	Reason     string `json:"reason,omitempty"`  // why it was denied; the same text the model was sent
+
+	WorkspaceChanged bool  `json:"workspace_changed,omitempty"` // the step changed /workspace, so the check ran
+	InputTokens      int64 `json:"input_tokens"`
+	OutputTokens     int64 `json:"output_tokens"` // includes thinking tokens
 }
 
 // Policy verdicts on a step's tool call, used in Step.Verdict. A denied
@@ -163,8 +184,10 @@ const (
 	PhaseStart = "start"
 	PhaseSetup = "setup"
 	PhaseAgent = "agent" // commands run by the agent's tool calls
-	PhaseCheck = "check"
-	PhaseStop  = "stop"
+
+	PhaseFingerprint = "fingerprint" // the harness hashing /workspace after a step
+	PhaseCheck       = "check"
+	PhaseStop        = "stop"
 )
 
 // NewRunID returns a sortable, file-name-safe run ID: UTC time plus a
@@ -213,6 +236,9 @@ func Write(dir string, t *Trace) (string, error) {
 	}
 	if t.Steps == nil {
 		t.Steps = []Step{}
+	}
+	if t.CheckRuns == nil {
+		t.CheckRuns = []CheckRun{}
 	}
 	// An Encoder (not json.Marshal) so HTML escaping can be turned off:
 	// by default Go writes ">" as "\u003e", which makes pytest output in
