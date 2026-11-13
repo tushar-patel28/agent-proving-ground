@@ -14,9 +14,9 @@ Build plan for Tushar Patel's INFO7375 final project. Every chat in this Project
 
 ## Current status
 
-- **Phase:** 1 — First slice
-- **Next task:** T2.1
-- **Last updated:** Nov 12, 2026
+- **Phase:** 2 — The full agentic loop
+- **Next task:** T2.2
+- **Last updated:** Nov 13, 2026
 
 ---
 
@@ -132,7 +132,12 @@ Goal: one task, one kind pod, one trace file, one PASS/FAIL line.
 
 ## Phase 2 — The full agentic loop (Nov 13 – Nov 19)
 
-**T2.1 Permission policy**
+**T2.1 Permission policy** ✅ Done Nov 13:
+- **Tests first:** `internal/policy/policy_test.go` was committed before `policy.go` (commit 07a724f), and all 146 subtests pass.
+- **run_command is now argv with no shell** (D20). The pod spec sets `workingDir: /workspace`.
+- **Seeded run** (scripted client, no model, real kind pod; evidence/traces/20261113T204817Z-a016749b.json): 5 denied steps (path, program, flag ×2, and a symlink caught by `realpath` in the pod). The trace also shows the python limit: python's symlink creation and its read of /etc/hostname were allowed. Result `FAIL check_failed`.
+- **Model run:** `apg run 001` with `claude-haiku-5-5` printed `001  PASS  steps=7  reason=check_passed`, with no denials; 10,977 input / 705 output tokens, est. $0.00145 (evidence/traces/20261113T204837Z-3a19814c.json).
+- **Docs:** docs/03-action-surface-map.md drafted.
 1. `internal/policy/policy_test.go` first: paths outside `/workspace` denied, commands not on the allowlist denied, tools not in the contract denied, check files not writable.
 2. `internal/policy/policy.go`: every tool call goes through `policy.Check` before it runs. Denied calls are recorded in the trace and never executed.
 - **Done when:** all policy tests pass, and a trace shows a denied call.
@@ -304,6 +309,7 @@ Goal: one task, one kind pod, one trace file, one PASS/FAIL line.
 | D17 | Nov 3 | Claude Code drafts packet docs; Tushar reviews | Decided |
 | D18 | Nov 11 | Claude Code implements everything; Tushar reviews and approves | Decided |
 | D19 | Nov 11 | kindnet enforces NetworkPolicy ~1–2 s after Ready; Start probes until egress is blocked (30 s limit, fail and delete pod), probes recorded with Start's commands | Decided |
+| D20 | Nov 13 | run_command takes an argv list and runs with no shell (`timeout 60 <argv>`), so the program allowlist means something; symlinks are caught by running `realpath -m` in the pod before a call runs; sed always gets `--sandbox`; the pod sets `workingDir: /workspace`. python/pytest still run arbitrary code: the pod is the boundary (docs/03) | Decided |
 
 ---
 

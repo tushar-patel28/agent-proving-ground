@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/tushar-patel28/agent-proving-ground/internal/loop"
+	"github.com/tushar-patel28/agent-proving-ground/internal/policy"
 	"github.com/tushar-patel28/agent-proving-ground/internal/sandbox"
 	"github.com/tushar-patel28/agent-proving-ground/internal/trace"
 )
@@ -307,12 +308,13 @@ func setupAndCheck(ctx context.Context, sb sandbox.Sandbox, tk task, rec func(st
 	// Check: copied in only now, after setup and the agent, into a
 	// directory with a random name so nothing can be planted there in
 	// advance. Known gap: a process the agent left running could still find
-	// and change it before it runs (T2.x).
+	// and change it before it runs (T2.x). The name starts with
+	// policy.CheckDirPrefix, which the policy's rule 3 denies.
 	b := make([]byte, 8)
 	if _, err := rand.Read(b); err != nil {
 		return 0, err
 	}
-	checkDir := "/tmp/apg-check-" + hex.EncodeToString(b)
+	checkDir := policy.CheckDirPrefix + hex.EncodeToString(b)
 	r, err = sb.Exec(ctx, "mkdir", "-m", "700", checkDir)
 	rec(trace.PhaseCheck, r)
 	if err != nil || r.ExitCode != 0 {

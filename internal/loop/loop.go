@@ -2,6 +2,10 @@
 // tool call in the sandbox, send the result back, and repeat until the model
 // stops calling tools or the step budget runs out.
 //
+// Every tool call goes through policy.Check before it runs (T2.1). A denied
+// call is recorded as a step with verdict "denied" and is never executed;
+// the model gets the reason as an error result.
+//
 // The loop never decides PASS or FAIL. After it ends, the harness runs the
 // hidden check, and only the check decides (D11).
 package loop
@@ -20,12 +24,10 @@ import (
 	"github.com/anthropics/anthropic-sdk-go/v2"
 	"github.com/anthropics/anthropic-sdk-go/v2/option"
 
+	"github.com/tushar-patel28/agent-proving-ground/internal/policy"
 	"github.com/tushar-patel28/agent-proving-ground/internal/sandbox"
 	"github.com/tushar-patel28/agent-proving-ground/internal/trace"
 )
-
-// Workspace is the only directory the file tools may touch.
-const Workspace = "/workspace"
 
 // maxOutput caps each tool result (sent to the model and kept in the trace)
 // and each step's text. 8 << 10 is 8 * 1024 = 8 KiB.
@@ -77,17 +79,19 @@ type Result struct {
 	Stop         string  // one of the Stop* constants
 }
 
-const systemPrompt = `You are a coding agent. You work inside an isolated Linux container with no network access. The task's repository is at /workspace, which is also the working directory. You can act only through the tools you are given, and file paths must be inside /workspace. Your work is checked independently after you finish. When the task is complete, reply with a short summary and do not call a tool.`
+const systemPrompt = `You are a coding agent. You work inside an isolated Linux container with no network access. The task's repository is at /workspace, which is also the working directory. You can act only through the tools you are given, and file paths must be inside /workspace. Every tool call is checked by a permission policy before it runs; a denied call is not run, and its result says why. Your work is checked independently after you finish. When the task is complete, reply with a short summary and do not call a tool.`
 
 // Run runs the loop. rec is called for every sandbox command a tool runs,
 // so the trace holds every host command. On error, Result still holds the
 // steps done so far.
 func Run(ctx context.Context, client Client, sb sandbox.Sandbox, cfg Config, rec func(sandbox.Result)) (Result, error) {
 	var res Result
-	tools, allowed, err := buildTools(cfg.Tools)
+	tools, err := buildTools(cfg.Tools)
 	if err != nil {
 		return res, err
 	}
+	pol := policy.New(cfg.Tools)
+	resolve := resolver(sb, rec)
 	if cfg.MaxSteps <= 0 {
 		return res, errors.New("max_steps must be positive")
 	}
@@ -159,12 +163,25 @@ func Run(ctx context.Context, client Client, sb sandbox.Sandbox, cfg Config, rec
 					"error: only one tool call per turn; this call was not run", true))
 				continue
 			}
-			o, err := runTool(ctx, sb, allowed, tu.Name, tu.Input, rec)
+			step.Tool, step.Input = tu.Name, truncate(string(tu.Input))
+			d, err := pol.Check(ctx, tu.Name, tu.Input, resolve)
+			if err != nil {
+				res.Steps = append(res.Steps, step)
+				return res, fmt.Errorf("step %d %s: policy: %w", n, tu.Name, err)
+			}
+			if !d.Allowed {
+				// Never executed. The model is told which rule and why.
+				step.Verdict, step.Rule, step.Reason = trace.StepDenied, d.Rule, d.Reason
+				step.Output, step.IsError = fmt.Sprintf("denied by policy (rule: %s): %s. The call was not run.", d.Rule, d.Reason), true
+				results = append(results, anthropic.NewToolResultBlock(tu.ID, step.Output, true))
+				continue
+			}
+			step.Verdict = trace.StepAllowed
+			o, err := runTool(ctx, sb, d, tu.Name, tu.Input, rec)
 			if err != nil {
 				res.Steps = append(res.Steps, step)
 				return res, fmt.Errorf("step %d %s: %w", n, tu.Name, err)
 			}
-			step.Tool, step.Input = tu.Name, truncate(string(tu.Input))
 			step.Output, step.ExitCode, step.IsError = o.text, o.exitCode, o.isError
 			results = append(results, anthropic.NewToolResultBlock(tu.ID, o.text, o.isError))
 		}
@@ -212,11 +229,18 @@ var toolDefs = map[string]anthropic.ToolParam{
 		Strict: anthropic.Bool(true),
 	},
 	"run_command": {
-		Name:        "run_command",
-		Description: anthropic.String("Run a shell command in /workspace (sh -c, 60-second limit). Returns the exit code, stdout, and stderr."),
+		Name: "run_command",
+		Description: anthropic.String("Run one program with arguments in /workspace (the working directory), with a 60-second limit. " +
+			"There is no shell: argv is passed to the program as-is, so pipes, &&, cd, redirection, globs, and quotes do not work; make one call per program. " +
+			"argv[0] must be one of: " + strings.Join(policy.Programs, ", ") + ". " +
+			"Path arguments must be inside /workspace. Returns the exit code, stdout, and stderr."),
 		InputSchema: schema(map[string]any{
-			"command": map[string]any{"type": "string", "description": "The shell command to run."},
-		}, "command"),
+			"argv": map[string]any{
+				"type":        "array",
+				"items":       map[string]any{"type": "string"},
+				"description": `Program and arguments, e.g. ["python", "-m", "pytest", "-q"].`,
+			},
+		}, "argv"),
 		Strict: anthropic.Bool(true),
 	},
 }
@@ -232,25 +256,51 @@ func schema(props map[string]any, required ...string) anthropic.ToolInputSchemaP
 	}
 }
 
-// buildTools returns the tool list for the request and the allowed set.
-// An unknown name in the contract is an error, not silently skipped.
-func buildTools(names []string) ([]anthropic.ToolUnionParam, map[string]bool, error) {
+// buildTools returns the tool list for the request. An unknown name in
+// the contract is an error, not silently skipped. (Which calls may run is
+// the policy's job: rule 1 checks each call against the contract.)
+func buildTools(names []string) ([]anthropic.ToolUnionParam, error) {
 	if len(names) == 0 {
-		return nil, nil, errors.New("contract allows no tools")
+		return nil, errors.New("contract allows no tools")
 	}
 	var tools []anthropic.ToolUnionParam
-	allowed := map[string]bool{}
 	for _, name := range names {
 		def, ok := toolDefs[name]
 		if !ok {
-			return nil, nil, fmt.Errorf("contract lists unknown tool %q", name)
+			return nil, fmt.Errorf("contract lists unknown tool %q", name)
 		}
 		// The Tools slice holds a union type; OfTool marks this one as a
 		// custom tool. &def is safe: def is a fresh copy each iteration.
 		tools = append(tools, anthropic.ToolUnionParam{OfTool: &def})
-		allowed[name] = true
 	}
-	return tools, allowed, nil
+	return tools, nil
+}
+
+// resolver returns the policy's Resolver for this sandbox: it runs
+// "realpath -m -- p1 p2 ..." in the pod (argv, no shell), which prints the
+// real path of each, following symlinks (-m: the path need not exist yet).
+// The command is recorded like any other. A non-zero exit or the wrong
+// number of lines returns no paths, so the policy denies the call.
+func resolver(sb sandbox.Sandbox, rec func(sandbox.Result)) policy.Resolver {
+	return func(ctx context.Context, paths []string) ([]string, error) {
+		// "--" stops realpath reading options, though these paths all
+		// start with "/workspace" anyway.
+		r, err := sb.Exec(ctx, append([]string{"realpath", "-m", "--"}, paths...)...)
+		rec(r)
+		if err != nil {
+			return nil, err
+		}
+		if r.ExitCode != 0 {
+			return nil, nil
+		}
+		// The policy denies control characters in paths, so one line per
+		// path is safe to split on.
+		out := strings.Split(strings.TrimSuffix(r.Stdout, "\n"), "\n")
+		if len(out) != len(paths) {
+			return nil, nil
+		}
+		return out, nil
+	}
 }
 
 // toolOutput is what one tool call returns to the model.
@@ -264,27 +314,13 @@ func toolError(format string, args ...any) toolOutput {
 	return toolOutput{text: "error: " + fmt.Sprintf(format, args...), isError: true}
 }
 
-// runTool executes one tool call. A bad call (unknown tool, bad input, path
-// outside /workspace) becomes an is_error result for the model and never
-// reaches the sandbox. The returned error is only for harness failures
-// (kubectl failed, context expired), which end the run.
-func runTool(ctx context.Context, sb sandbox.Sandbox, allowed map[string]bool, name string, raw json.RawMessage, rec func(sandbox.Result)) (toolOutput, error) {
-	if !allowed[name] {
-		return toolError("tool %q is not allowed for this task", name), nil
-	}
+// runTool executes one tool call that the policy allowed, using the
+// decision's clean path or argv. The returned error is only for harness
+// failures (kubectl failed, context expired), which end the run.
+func runTool(ctx context.Context, sb sandbox.Sandbox, d policy.Decision, name string, raw json.RawMessage, rec func(sandbox.Result)) (toolOutput, error) {
 	switch name {
 	case "read_file":
-		var in struct {
-			Path string `json:"path"`
-		}
-		if err := json.Unmarshal(raw, &in); err != nil {
-			return toolError("invalid input: %v", err), nil
-		}
-		p, err := workspacePath(in.Path)
-		if err != nil {
-			return toolError("%v", err), nil
-		}
-		r, err := sb.Exec(ctx, "cat", p)
+		r, err := sb.Exec(ctx, "cat", d.Path)
 		rec(r)
 		if err != nil {
 			return toolOutput{}, err
@@ -297,34 +333,17 @@ func runTool(ctx context.Context, sb sandbox.Sandbox, allowed map[string]bool, n
 
 	case "write_file":
 		var in struct {
-			Path    string `json:"path"`
 			Content string `json:"content"`
 		}
-		if err := json.Unmarshal(raw, &in); err != nil {
+		if err := json.Unmarshal(raw, &in); err != nil { // the policy already parsed it once
 			return toolError("invalid input: %v", err), nil
 		}
-		p, err := workspacePath(in.Path)
-		if err != nil {
-			return toolError("%v", err), nil
-		}
-		if p == Workspace {
-			return toolError("path is the workspace directory itself, not a file"), nil
-		}
-		return writeFile(ctx, sb, p, in.Content, rec)
+		return writeFile(ctx, sb, d.Path, in.Content, rec)
 
 	case "run_command":
-		var in struct {
-			Command string `json:"command"`
-		}
-		if err := json.Unmarshal(raw, &in); err != nil {
-			return toolError("invalid input: %v", err), nil
-		}
-		if strings.TrimSpace(in.Command) == "" {
-			return toolError("empty command"), nil
-		}
-		// Not restricted yet: the permission policy comes in T2.1. timeout
-		// kills the command inside the pod after 60 seconds (exit 124).
-		r, err := sb.Exec(ctx, "timeout", "60", "sh", "-c", in.Command)
+		// No shell: the argv goes to kubectl exec as separate arguments.
+		// timeout kills the command inside the pod after 60 seconds (exit 124).
+		r, err := sb.Exec(ctx, append([]string{"timeout", "60"}, d.Argv...)...)
 		rec(r)
 		if err != nil {
 			return toolOutput{}, err
@@ -376,23 +395,6 @@ func writeFile(ctx context.Context, sb sandbox.Sandbox, p, content string, rec f
 	}
 	code := 0
 	return toolOutput{text: fmt.Sprintf("wrote %d bytes to %s", len(content), p), exitCode: &code}, nil
-}
-
-// workspacePath resolves p against /workspace and rejects anything outside
-// it. It uses package path (always "/"), not path/filepath, because these
-// are paths inside the Linux pod, not on the host.
-func workspacePath(p string) (string, error) {
-	if strings.TrimSpace(p) == "" {
-		return "", errors.New("empty path")
-	}
-	if !path.IsAbs(p) {
-		p = path.Join(Workspace, p)
-	}
-	p = path.Clean(p) // resolves ".." so /workspace/../etc becomes /etc
-	if p != Workspace && !strings.HasPrefix(p, Workspace+"/") {
-		return "", fmt.Errorf("path %s is outside %s", p, Workspace)
-	}
-	return p, nil
 }
 
 // cleanStderr drops kubectl's own "command terminated with exit code N"

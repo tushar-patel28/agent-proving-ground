@@ -54,11 +54,15 @@ func endTurn(text string, in, out int) string {
 
 func itoa(n int) string { b, _ := json.Marshal(n); return string(b) }
 
-// fakeSandbox records calls. exec decides what each Exec returns.
+// fakeSandbox records calls. exec decides what each Exec returns, except
+// for realpath (the policy's path resolver), which the fake answers itself:
+// each path comes back unchanged unless links maps it (or a parent
+// directory) somewhere else, like a symlink.
 type fakeSandbox struct {
 	execs  [][]string
 	copied map[string]string // sandbox path -> content copied in
 	exec   func(cmd []string) sandbox.Result
+	links  map[string]string // symlink path -> target
 }
 
 func (f *fakeSandbox) Start(context.Context) ([]sandbox.Result, error) { return nil, nil }
@@ -69,6 +73,17 @@ func (f *fakeSandbox) CopyOut(context.Context, string, string) (sandbox.Result, 
 func (f *fakeSandbox) Exec(_ context.Context, cmd ...string) (sandbox.Result, error) {
 	f.execs = append(f.execs, cmd)
 	r := sandbox.Result{Args: append([]string{"kubectl", "exec", "--"}, cmd...)}
+	if cmd[0] == "realpath" { // realpath -m -- p1 p2 ...
+		for _, p := range cmd[3:] {
+			for from, to := range f.links {
+				if p == from || strings.HasPrefix(p, from+"/") {
+					p = to + strings.TrimPrefix(p, from)
+				}
+			}
+			r.Stdout += p + "\n"
+		}
+		return r, nil
+	}
 	if f.exec != nil {
 		out := f.exec(cmd)
 		r.Stdout, r.Stderr, r.ExitCode = out.Stdout, out.Stderr, out.ExitCode
@@ -125,6 +140,9 @@ func TestRunReadWriteEnd(t *testing.T) {
 	if s1.Tool != "read_file" || s1.Output != "return a // b\n" || s1.ExitCode == nil || *s1.ExitCode != 0 {
 		t.Errorf("step 1 = %+v", s1)
 	}
+	if s1.Verdict != "allowed" || s2.Verdict != "allowed" || s3.Verdict != "" {
+		t.Errorf("verdicts = %q %q %q, want allowed allowed and none for the final turn", s1.Verdict, s2.Verdict, s3.Verdict)
+	}
 	if s1.InputTokens != 100 || s1.OutputTokens != 20 || s1.Text != "calling read_file" {
 		t.Errorf("step 1 tokens/text = %+v", s1)
 	}
@@ -135,16 +153,20 @@ func TestRunReadWriteEnd(t *testing.T) {
 		t.Errorf("step 3 = %+v", s3)
 	}
 
-	// The relative path was resolved under /workspace before reaching the sandbox.
-	if got := sb.execs[0]; strings.Join(got, " ") != "cat /workspace/calc/ops.py" {
+	// The relative path was resolved under /workspace (policy, then
+	// realpath in the pod) before the file was read.
+	if got := strings.Join(sb.execs[0], " "); got != "realpath -m -- /workspace/calc/ops.py" {
 		t.Errorf("first exec = %q", got)
+	}
+	if got := strings.Join(sb.execs[1], " "); got != "cat /workspace/calc/ops.py" {
+		t.Errorf("second exec = %q", got)
 	}
 	if sb.copied["/workspace/calc/ops.py"] != "fixed\n" {
 		t.Errorf("write_file content not copied in: %v", sb.copied)
 	}
-	// cat, mkdir -p, cp: every sandbox command was recorded.
-	if len(recorded) != 3 {
-		t.Errorf("recorded %d commands, want 3", len(recorded))
+	// realpath, cat, realpath, mkdir -p, cp: every sandbox command was recorded.
+	if len(recorded) != 5 {
+		t.Errorf("recorded %d commands, want 5", len(recorded))
 	}
 
 	// The second request carries the tool_result for toolu_1, and the
@@ -174,7 +196,7 @@ func TestRunReadWriteEnd(t *testing.T) {
 func TestRunStopsAtMaxSteps(t *testing.T) {
 	var resp []string
 	for i := 0; i < 20; i++ {
-		resp = append(resp, toolUse("toolu_x", "run_command", `{"command":"ls"}`, 10, 5))
+		resp = append(resp, toolUse("toolu_x", "run_command", `{"argv":["ls"]}`, 10, 5))
 	}
 	client := &fakeClient{responses: resp}
 	c := cfg()
@@ -190,12 +212,15 @@ func TestRunStopsAtMaxSteps(t *testing.T) {
 
 func TestRunRejectsBadCalls(t *testing.T) {
 	tests := []struct {
-		name, tool, input, wantText string
+		name, tool, input, wantText, wantRule string
 	}{
-		{"parent escape", "read_file", `{"path":"../etc/passwd"}`, "outside /workspace"},
-		{"absolute escape", "write_file", `{"path":"/tmp/x","content":"y"}`, "outside /workspace"},
-		{"dotdot inside path", "read_file", `{"path":"/workspace/../etc/shadow"}`, "outside /workspace"},
-		{"not in contract", "delete_file", `{"path":"a"}`, "not allowed"},
+		{"parent escape", "read_file", `{"path":"../etc/passwd"}`, "outside /workspace", "path"},
+		{"absolute escape", "write_file", `{"path":"/tmp/x","content":"y"}`, "outside /workspace", "path"},
+		{"dotdot inside path", "read_file", `{"path":"/workspace/../etc/shadow"}`, "outside /workspace", "path"},
+		{"not in contract", "delete_file", `{"path":"a"}`, "not allowed", "tool"},
+		{"shell", "run_command", `{"argv":["sh","-c","cat /etc/passwd"]}`, "not on the allowlist", "program"},
+		{"old command shape", "run_command", `{"command":"ls"}`, "invalid input", "input"},
+		{"find -delete", "run_command", `{"argv":["find",".","-delete"]}`, "deletes files", "flag"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -212,12 +237,15 @@ func TestRunRejectsBadCalls(t *testing.T) {
 			if !s.IsError || !strings.Contains(s.Output, tc.wantText) {
 				t.Errorf("step = %+v, want is_error containing %q", s, tc.wantText)
 			}
+			if s.Verdict != "denied" || s.Rule != tc.wantRule || !strings.Contains(s.Reason, tc.wantText) || s.ExitCode != nil {
+				t.Errorf("trace step verdict=%q rule=%q reason=%q exit=%v, want denied %q", s.Verdict, s.Rule, s.Reason, s.ExitCode, tc.wantRule)
+			}
 			if len(sb.execs) != 0 || len(sb.copied) != 0 {
 				t.Errorf("rejected call reached the sandbox: execs=%v copied=%v", sb.execs, sb.copied)
 			}
 			b, _ := json.Marshal(client.calls[1].Messages)
-			if !strings.Contains(string(b), `"is_error":true`) {
-				t.Errorf("model was not told the call failed: %s", b)
+			if !strings.Contains(string(b), `"is_error":true`) || !strings.Contains(string(b), "denied by policy") {
+				t.Errorf("model was not told the call was denied: %s", b)
 			}
 		})
 	}
@@ -247,7 +275,7 @@ func TestUnknownContractToolIsAnError(t *testing.T) {
 func TestRunCommandOutputAndTruncation(t *testing.T) {
 	big := strings.Repeat("é", maxOutput) // 2 bytes each: twice the cap
 	client := &fakeClient{responses: []string{
-		toolUse("toolu_1", "run_command", `{"command":"pytest -q"}`, 10, 5),
+		toolUse("toolu_1", "run_command", `{"argv":["pytest","-q"]}`, 10, 5),
 		endTurn("ok", 10, 5),
 	}}
 	sb := &fakeSandbox{exec: func([]string) sandbox.Result {
@@ -267,8 +295,10 @@ func TestRunCommandOutputAndTruncation(t *testing.T) {
 	if strings.Contains(s.Output, "command terminated") {
 		t.Error("kubectl's own stderr line should be removed")
 	}
-	if got := strings.Join(sb.execs[0], " "); got != "timeout 60 sh -c pytest -q" {
-		t.Errorf("exec = %q", got)
+	// "-q" is an option with no path in it, so nothing needs realpath,
+	// and the only exec is the command itself: argv form, no shell.
+	if len(sb.execs) != 1 || strings.Join(sb.execs[0], " ") != "timeout 60 pytest -q" {
+		t.Errorf("execs = %q", sb.execs)
 	}
 }
 
@@ -281,7 +311,7 @@ func TestTruncateKeepsUTF8Valid(t *testing.T) {
 }
 
 func TestStopsOnMaxTokensWithoutRunningTool(t *testing.T) {
-	resp := strings.Replace(toolUse("toolu_1", "run_command", `{"command":"rm -rf /workspace"}`, 10, 5),
+	resp := strings.Replace(toolUse("toolu_1", "run_command", `{"argv":["find",".","-name","x"]}`, 10, 5),
 		`"stop_reason":"tool_use"`, `"stop_reason":"max_tokens"`, 1)
 	sb := &fakeSandbox{}
 	res, err := Run(context.Background(), &fakeClient{responses: []string{resp}}, sb, cfg(), func(sandbox.Result) {})
@@ -312,5 +342,58 @@ func TestEstimateCost(t *testing.T) {
 	}
 	if _, err := EstimateCost("unknown-model", 1, 1); err == nil {
 		t.Error("unknown model should be an error")
+	}
+}
+
+// A symlink out of /workspace passes the text checks, so the policy asks
+// the sandbox (realpath) and denies the call; the read itself never runs.
+func TestSymlinkDeniedAfterRealpath(t *testing.T) {
+	client := &fakeClient{responses: []string{
+		toolUse("toolu_1", "read_file", `{"path":"etc-link/passwd"}`, 10, 5),
+		endTurn("ok", 10, 5),
+	}}
+	sb := &fakeSandbox{links: map[string]string{"/workspace/etc-link": "/etc"}}
+	var recorded []sandbox.Result
+	res, err := Run(context.Background(), client, sb, cfg(), func(r sandbox.Result) { recorded = append(recorded, r) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := res.Steps[0]
+	if s.Verdict != "denied" || s.Rule != "path" || !strings.Contains(s.Reason, "resolves to /etc/passwd") {
+		t.Errorf("step = %+v", s)
+	}
+	if len(sb.execs) != 1 || sb.execs[0][0] != "realpath" {
+		t.Errorf("execs = %q, want only realpath", sb.execs)
+	}
+	if len(recorded) != 1 {
+		t.Errorf("recorded %d commands, want the realpath call", len(recorded))
+	}
+}
+
+// sed runs with --sandbox, and every command is argv with timeout in front.
+func TestRunCommandArgv(t *testing.T) {
+	client := &fakeClient{responses: []string{
+		toolUse("toolu_1", "run_command", `{"argv":["sed","-i","s|    return a // b|    return a / b|","calc/ops.py"]}`, 10, 5),
+		endTurn("ok", 10, 5),
+	}}
+	sb := &fakeSandbox{}
+	if _, err := Run(context.Background(), client, sb, cfg(), func(sandbox.Result) {}); err != nil {
+		t.Fatal(err)
+	}
+	last := sb.execs[len(sb.execs)-1]
+	want := []string{"timeout", "60", "sed", "--sandbox", "-i", "s|    return a // b|    return a / b|", "calc/ops.py"}
+	if strings.Join(last, "\x00") != strings.Join(want, "\x00") {
+		t.Errorf("exec = %q, want %q", last, want)
+	}
+}
+
+// The run_command tool takes an argv array, and its description names the
+// allowlist.
+func TestRunCommandSchema(t *testing.T) {
+	b, _ := json.Marshal(toolDefs["run_command"])
+	for _, want := range []string{`"argv":{`, `"type":"array"`, `"items":{"type":"string"}`, "no shell", "python, sed"} {
+		if !strings.Contains(string(b), want) {
+			t.Errorf("run_command definition lacks %q: %s", want, b)
+		}
 	}
 }

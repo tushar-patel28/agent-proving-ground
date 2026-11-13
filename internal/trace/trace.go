@@ -96,9 +96,19 @@ type Step struct {
 	Output       string `json:"output,omitempty"`    // tool result sent back to the model, truncated
 	ExitCode     *int   `json:"exit_code,omitempty"` // pointer: nil (omitted) when nothing ran in the sandbox
 	IsError      bool   `json:"is_error,omitempty"`
+	Verdict      string `json:"verdict,omitempty"` // policy decision on the tool call: allowed | denied; empty when no tool call
+	Rule         string `json:"rule,omitempty"`    // the policy rule that denied it (internal/policy Rule* constants)
+	Reason       string `json:"reason,omitempty"`  // why it was denied; the same text the model was sent
 	InputTokens  int64  `json:"input_tokens"`
 	OutputTokens int64  `json:"output_tokens"` // includes thinking tokens
 }
+
+// Policy verdicts on a step's tool call, used in Step.Verdict. A denied
+// call was never executed.
+const (
+	StepAllowed = "allowed"
+	StepDenied  = "denied"
+)
 
 // Phases of a run, used in Command.Phase.
 const (
