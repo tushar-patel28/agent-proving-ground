@@ -188,7 +188,7 @@ func TestEachExitReason(t *testing.T) {
 				tc.limits(&lim)
 			}
 			sb := &exitSandbox{checkExit: tc.checkExit}
-			tr := runTask(context.Background(), sb, "apg-fake", exitTask(lim), tc.client)
+			tr := runTask(context.Background(), sb, "apg-fake", exitTask(lim), tc.client, nil)
 
 			if tr.ExitReason != tc.wantReason || tr.Verdict != tc.wantVerdict {
 				t.Fatalf("reason=%s verdict=%s (error %q), want %s %s", tr.ExitReason, tr.Verdict, tr.Error, tc.wantReason, tc.wantVerdict)
@@ -224,7 +224,7 @@ func TestInterruptIsAnError(t *testing.T) {
 	client := &exitClient{block: true, counts: []int64{100}}
 	sb := &exitSandbox{}
 	go func() { time.Sleep(100 * time.Millisecond); cancel() }() // "go" runs the func concurrently
-	tr := runTask(ctx, sb, "apg-fake", exitTask(roomy), client)
+	tr := runTask(ctx, sb, "apg-fake", exitTask(roomy), client, nil)
 	if tr.ExitReason != trace.ReasonError || sb.checkRan || !sb.stopped || sb.stopCtxErr != nil {
 		t.Errorf("reason=%s checkRan=%v stopped=%v stopErr=%v", tr.ExitReason, sb.checkRan, sb.stopped, sb.stopCtxErr)
 	}
@@ -237,7 +237,7 @@ func TestTimeoutDuringTool(t *testing.T) {
 	lim.Timeout = 200 * time.Millisecond
 	client := &exitClient{replies: []reply{ls}, counts: []int64{100}}
 	sb := &slowToolSandbox{exitSandbox: exitSandbox{checkExit: 1}}
-	tr := runTask(context.Background(), sb, "apg-fake", exitTask(lim), client)
+	tr := runTask(context.Background(), sb, "apg-fake", exitTask(lim), client, nil)
 	if tr.ExitReason != trace.ReasonTimeout || !sb.checkRan || !sb.stopped {
 		t.Fatalf("reason=%s checkRan=%v stopped=%v (error %q)", tr.ExitReason, sb.checkRan, sb.stopped, tr.Error)
 	}

@@ -191,7 +191,7 @@ const fixed = "def divide(a, b):\n    return a / b\n"
 
 func runStop(t *testing.T, sb *stopSandbox, c *stopClient) *trace.Trace {
 	t.Helper()
-	tr := runTask(context.Background(), sb, "apg-fake", exitTask(roomy), c)
+	tr := runTask(context.Background(), sb, "apg-fake", exitTask(roomy), c, nil)
 	if _, err := trace.Write(t.TempDir(), tr); err != nil {
 		t.Errorf("trace does not write: %v", err)
 	}

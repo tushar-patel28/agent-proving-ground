@@ -78,7 +78,7 @@ func TestCheckHiddenOnKind(t *testing.T) {
 		call("write_file", map[string]string{"path": "notes.txt", "content": "looking at divide\n"}),
 		call("run_command", map[string]any{"argv": []string{"python", "-c", "import glob; print(glob.glob('/tmp/apg-' + 'check-*'))"}}),
 	}}
-	tr := runTask(ctx, sb, sb.PodName(), tk, client)
+	tr := runTask(ctx, sb, sb.PodName(), tk, client, nil)
 	tr.Model = "scripted (no model)"
 
 	dir := os.Getenv("APG_SEEDED_TRACES")

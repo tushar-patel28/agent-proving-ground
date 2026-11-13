@@ -43,7 +43,7 @@ func TestTimeoutDeletesPodOnKind(t *testing.T) {
 		`run_command {"argv":["python","-c","import time; time.sleep(30)"]}`,
 	}}
 	began := time.Now()
-	tr := runTask(ctx, sb, sb.PodName(), tk, client)
+	tr := runTask(ctx, sb, sb.PodName(), tk, client, nil)
 	tr.Model = "scripted (no model)"
 	t.Logf("run took %s", time.Since(began).Round(time.Millisecond))
 

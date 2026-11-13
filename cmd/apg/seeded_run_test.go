@@ -104,7 +104,7 @@ func TestSeededRunOnKind(t *testing.T) {
 		`read_file {"path":"etc-link/passwd"}`,
 		`run_command {"argv":["python","-c","print(open('/etc/hostname').read().strip())"]}`,
 	}}
-	tr := runTask(ctx, sb, sb.PodName(), tk, client)
+	tr := runTask(ctx, sb, sb.PodName(), tk, client, nil)
 	tr.Model = "scripted (no model)" // runTask fills in the default model name
 
 	dir := os.Getenv("APG_SEEDED_TRACES")
