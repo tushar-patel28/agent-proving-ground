@@ -15,7 +15,7 @@ Build plan for Tushar Patel's INFO7375 final project. Every chat in this Project
 ## Current status
 
 - **Phase:** 2 — The full agentic loop
-- **Next task:** T2.2
+- **Next task:** T2.3
 - **Last updated:** Nov 13, 2026
 
 ---
@@ -142,7 +142,12 @@ Goal: one task, one kind pod, one trace file, one PASS/FAIL line.
 2. `internal/policy/policy.go`: every tool call goes through `policy.Check` before it runs. Denied calls are recorded in the trace and never executed.
 - **Done when:** all policy tests pass, and a trace shows a denied call.
 
-**T2.2 Budget and exits**
+**T2.2 Budget and exits** ✅ Done Nov 13:
+- **Budget:** the contract sets the limits, with harness defaults for any it leaves out: steps, total tokens, estimated cost, timeout, policy violations. Prices live in `internal/budget`, the only place. Before each model call the loop checks the timeout, then denied calls and steps, then whether the worst case fits: `count_tokens` input plus the full 16,000-token reply (D21).
+- **Exit reasons:** a typed list, with `gate_*` reserved for T2.4. After every exit except `error` the check still runs, and the verdict is its result.
+- **Tests:** `cmd/apg/exits_test.go` forces each of the 8 wired exits with a fake client.
+- **Timeout on kind** (seeded, scripted `sleep 30`, 3 s timeout; evidence/traces/20261113T211758Z-49d059aa.json): `timeout` after 3 s, the check still ran (exit 1), and `kubectl get pod` returned NotFound afterwards.
+- **Model run:** `apg run 001` with `claude-haiku-5-5` printed `001  PASS  steps=6  reason=check_passed`. Used 9,809 of 100,000 tokens, est. $0.00125 of $0.02, 10.8 s of 300 s, 0 of 3 violations, 6 count_tokens calls (evidence/traces/20261113T211840Z-96b482d3.json).
 1. Budget: max steps, max tokens, estimated cost cap, wall-clock timeout (`context.WithTimeout`).
 2. Exit reasons as a fixed list: `check_passed`, `check_failed`, `budget_steps`, `budget_tokens`, `budget_cost`, `timeout`, `policy_violation_limit`, `gate_refused`, `gate_deferred`, `error`.
 - **Done when:** a test forces each budget exit.
@@ -310,6 +315,7 @@ Goal: one task, one kind pod, one trace file, one PASS/FAIL line.
 | D18 | Nov 11 | Claude Code implements everything; Tushar reviews and approves | Decided |
 | D19 | Nov 11 | kindnet enforces NetworkPolicy ~1–2 s after Ready; Start probes until egress is blocked (30 s limit, fail and delete pod), probes recorded with Start's commands | Decided |
 | D20 | Nov 13 | run_command takes an argv list and runs with no shell (`timeout 60 <argv>`), so the program allowlist means something; symlinks are caught by running `realpath -m` in the pod before a call runs; sed always gets `--sandbox`; the pod sets `workingDir: /workspace`. python/pytest still run arbitrary code: the pod is the boundary (docs/03) | Decided |
+| D21 | Nov 13 | Budget exits: the exit reason says why the loop stopped and the verdict is still the check's result (PASS with `budget_steps` is possible); the timeout covers the agent loop only (setup, check and stop have fixed harness limits, so the check and pod cleanup run after a timeout); a step starts only if `count_tokens` input + the full per-reply max_tokens fits the token and cost limits; Ctrl-C is `error`, not `timeout` | Decided |
 
 ---
 

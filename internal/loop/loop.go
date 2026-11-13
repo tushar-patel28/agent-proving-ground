@@ -24,6 +24,7 @@ import (
 	"github.com/anthropics/anthropic-sdk-go/v2"
 	"github.com/anthropics/anthropic-sdk-go/v2/option"
 
+	"github.com/tushar-patel28/agent-proving-ground/internal/budget"
 	"github.com/tushar-patel28/agent-proving-ground/internal/policy"
 	"github.com/tushar-patel28/agent-proving-ground/internal/sandbox"
 	"github.com/tushar-patel28/agent-proving-ground/internal/trace"
@@ -36,15 +37,17 @@ const maxOutput = 8 << 10
 // Why the loop ended (trace field loop_stop).
 const (
 	StopEndTurn   = "end_turn"   // the model replied without a tool call
-	StopMaxSteps  = "max_steps"  // the step budget ran out
-	StopMaxTokens = "max_tokens" // a reply hit max_tokens; its tool call (if any) was not run
+	StopMaxTokens = "max_tokens" // a reply hit the per-reply max_tokens; its tool call (if any) was not run
 	StopRefusal   = "refusal"    // the model declined
+	StopLimit     = "limit"      // a budget, the timeout, or the policy-violation limit; Result.Exit says which
 )
 
-// Client is the one model call the loop needs. The real one wraps the
-// Anthropic SDK; tests pass a fake, so they need no API key or network.
+// Client is the model API the loop needs: one message call, and a token
+// count for the budget check before it. The real one wraps the Anthropic
+// SDK; tests pass a fake, so they need no API key or network.
 type Client interface {
 	New(ctx context.Context, params anthropic.MessageNewParams) (*anthropic.Message, error)
+	CountTokens(ctx context.Context, params anthropic.MessageCountTokensParams) (*anthropic.MessageTokensCount, error)
 }
 
 // anthropicClient adapts the SDK client to Client.
@@ -52,6 +55,10 @@ type anthropicClient struct{ c anthropic.Client }
 
 func (a *anthropicClient) New(ctx context.Context, p anthropic.MessageNewParams) (*anthropic.Message, error) {
 	return a.c.Messages.New(ctx, p)
+}
+
+func (a *anthropicClient) CountTokens(ctx context.Context, p anthropic.MessageCountTokensParams) (*anthropic.MessageTokensCount, error) {
+	return a.c.Messages.CountTokens(ctx, p)
 }
 
 // NewAnthropicClient returns the real client. anthropic.NewClient reads
@@ -65,18 +72,18 @@ func NewAnthropicClient() Client {
 type Config struct {
 	Model     string
 	Goal      string
-	Tools     []string // allowed_tools from contract.json
-	MaxSteps  int      // max model turns
-	MaxTokens int64    // per model reply
+	Tools     []string      // allowed_tools from contract.json
+	Limits    budget.Limits // the run's budget; Limits.Timeout is applied by the caller's ctx
+	MaxTokens int64         // per model reply
 }
 
 // Result is what the loop did, for the trace.
 type Result struct {
-	Steps        []trace.Step
-	InputTokens  int64
-	OutputTokens int64
-	CostUSD      float64 // estimated from list prices
-	Stop         string  // one of the Stop* constants
+	Steps            []trace.Step
+	Used             budget.Used
+	CountTokensCalls int
+	Stop             string           // one of the Stop* constants
+	Exit             trace.ExitReason // which limit stopped the loop when Stop is StopLimit; "" otherwise
 }
 
 const systemPrompt = `You are a coding agent. You work inside an isolated Linux container with no network access. The task's repository is at /workspace, which is also the working directory. You can act only through the tools you are given, and file paths must be inside /workspace. Every tool call is checked by a permission policy before it runs; a denied call is not run, and its result says why. Your work is checked independently after you finish. When the task is complete, reply with a short summary and do not call a tool.`
@@ -84,30 +91,63 @@ const systemPrompt = `You are a coding agent. You work inside an isolated Linux 
 // Run runs the loop. rec is called for every sandbox command a tool runs,
 // so the trace holds every host command. On error, Result still holds the
 // steps done so far.
+//
+// Before each model call, Run checks the budget: the timeout (ctx's
+// deadline), denied calls, steps, then tokens and cost for the worst case
+// of the next call (see package budget). If one is used up, the loop stops
+// with Stop = StopLimit and Exit naming the limit; that is not an error.
+// The caller sets the timeout with context.WithTimeout; when the deadline
+// passes during a call, the call is cut off and the loop stops with
+// Exit = timeout. A cancelled ctx (Ctrl-C) is an error.
 func Run(ctx context.Context, client Client, sb sandbox.Sandbox, cfg Config, rec func(sandbox.Result)) (Result, error) {
 	var res Result
 	tools, err := buildTools(cfg.Tools)
 	if err != nil {
 		return res, err
 	}
+	lim := cfg.Limits
+	if lim.MaxSteps <= 0 || lim.MaxTotalTokens <= 0 || lim.MaxCostUSD <= 0 || lim.MaxPolicyViolations <= 0 || cfg.MaxTokens <= 0 {
+		return res, fmt.Errorf("limits must be positive: %+v, max_tokens %d", lim, cfg.MaxTokens)
+	}
 	pol := policy.New(cfg.Tools)
 	resolve := resolver(sb, rec)
-	if cfg.MaxSteps <= 0 {
-		return res, errors.New("max_steps must be positive")
+
+	// count_tokens takes the same request, but its tools field has its own
+	// union type, so the tool list is converted once here.
+	var countTools []anthropic.MessageCountTokensToolUnionParam
+	for _, t := range tools {
+		countTools = append(countTools, anthropic.MessageCountTokensToolUnionParam{OfTool: t.OfTool})
+	}
+
+	// stop ends the loop because a limit was reached.
+	stop := func(why trace.ExitReason) (Result, error) {
+		res.Stop, res.Exit = StopLimit, why
+		return res, nil
+	}
+	// failed ends the loop on an error, unless the error came from ctx's
+	// deadline: then it is the timeout limit, not a harness failure.
+	failed := func(err error) (Result, error) {
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return stop(trace.ReasonTimeout)
+		}
+		return res, err
 	}
 
 	// messages is the whole conversation; each request resends all of it.
 	messages := []anthropic.MessageParam{
 		anthropic.NewUserMessage(anthropic.NewTextBlock(fmt.Sprintf(
-			"Task: %s\n\nYou have at most %d turns.", cfg.Goal, cfg.MaxSteps))),
+			"Task: %s\n\nYou have at most %d turns.", cfg.Goal, lim.MaxSteps))),
 	}
 
 	for n := 1; ; n++ {
-		if n > cfg.MaxSteps {
-			res.Stop = StopMaxSteps
-			return res, nil
+		// Budget check, before anything is spent on step n.
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return stop(trace.ReasonTimeout)
 		}
-		resp, err := client.New(ctx, anthropic.MessageNewParams{
+		if why := lim.Before(res.Used); why != "" {
+			return stop(why)
+		}
+		params := anthropic.MessageNewParams{
 			Model:     cfg.Model, // anthropic.Model is a string type, so a plain string works
 			MaxTokens: cfg.MaxTokens,
 			System:    []anthropic.TextBlockParam{{Text: systemPrompt}},
@@ -118,18 +158,40 @@ func Run(ctx context.Context, client Client, sb sandbox.Sandbox, cfg Config, rec
 			ToolChoice: anthropic.ToolChoiceUnionParam{
 				OfAuto: &anthropic.ToolChoiceAutoParam{DisableParallelToolUse: anthropic.Bool(true)},
 			},
+		}
+		count, err := client.CountTokens(ctx, anthropic.MessageCountTokensParams{
+			Model:      params.Model,
+			Messages:   params.Messages,
+			System:     anthropic.MessageCountTokensParamsSystemUnion{OfTextBlockArray: params.System},
+			Tools:      countTools,
+			ToolChoice: params.ToolChoice,
 		})
 		if err != nil {
-			return res, fmt.Errorf("model call %d: %w", n, err)
+			return failed(fmt.Errorf("count tokens for call %d: %w", n, err))
 		}
-		in, out := resp.Usage.InputTokens, resp.Usage.OutputTokens
-		res.InputTokens += in
-		res.OutputTokens += out
-		cost, err := EstimateCost(cfg.Model, in, out)
+		res.CountTokensCalls++
+		// Worst case: the counted input plus a reply of the full max_tokens.
+		why, err := lim.Fits(cfg.Model, res.Used, count.InputTokens, cfg.MaxTokens)
 		if err != nil {
 			return res, err
 		}
-		res.CostUSD += cost
+		if why != "" {
+			return stop(why)
+		}
+
+		resp, err := client.New(ctx, params)
+		if err != nil {
+			return failed(fmt.Errorf("model call %d: %w", n, err))
+		}
+		in, out := resp.Usage.InputTokens, resp.Usage.OutputTokens
+		cost, err := budget.EstimateCost(cfg.Model, in, out)
+		if err != nil {
+			return res, err
+		}
+		res.Used.Steps = n
+		res.Used.InputTokens += in
+		res.Used.OutputTokens += out
+		res.Used.CostUSD += cost
 
 		// The reply goes into the history before its tool results.
 		// ToParam converts the response type into the request type.
@@ -167,20 +229,22 @@ func Run(ctx context.Context, client Client, sb sandbox.Sandbox, cfg Config, rec
 			d, err := pol.Check(ctx, tu.Name, tu.Input, resolve)
 			if err != nil {
 				res.Steps = append(res.Steps, step)
-				return res, fmt.Errorf("step %d %s: policy: %w", n, tu.Name, err)
+				return failed(fmt.Errorf("step %d %s: policy: %w", n, tu.Name, err))
 			}
 			if !d.Allowed {
 				// Never executed. The model is told which rule and why.
 				step.Verdict, step.Rule, step.Reason = trace.StepDenied, d.Rule, d.Reason
 				step.Output, step.IsError = fmt.Sprintf("denied by policy (rule: %s): %s. The call was not run.", d.Rule, d.Reason), true
 				results = append(results, anthropic.NewToolResultBlock(tu.ID, step.Output, true))
+				res.Used.PolicyViolations++
 				continue
 			}
 			step.Verdict = trace.StepAllowed
 			o, err := runTool(ctx, sb, d, tu.Name, tu.Input, rec)
 			if err != nil {
+				step.Output, step.IsError = "error: "+err.Error(), true
 				res.Steps = append(res.Steps, step)
-				return res, fmt.Errorf("step %d %s: %w", n, tu.Name, err)
+				return failed(fmt.Errorf("step %d %s: %w", n, tu.Name, err))
 			}
 			step.Output, step.ExitCode, step.IsError = o.text, o.exitCode, o.isError
 			results = append(results, anthropic.NewToolResultBlock(tu.ID, o.text, o.isError))
@@ -422,32 +486,4 @@ func truncate(s string) string {
 		cut--
 	}
 	return s[:cut] + fmt.Sprintf("\n...[truncated %d bytes]", len(s)-cut)
-}
-
-// price is USD per million tokens. Long-prompt rates apply when one
-// request's input exceeds longOver tokens.
-type price struct {
-	in, out         float64
-	inLong, outLong float64
-	longOver        int64
-}
-
-// prices are list prices from the Claude API pricing table (cached Nov 3,
-// 2026). The estimate ignores prompt caching (not used) and taxes; it is not
-// a bill.
-var prices = map[string]price{
-	"claude-haiku-5-5": {in: 0.10, out: 0.50, inLong: 0.50, outLong: 2.50, longOver: 100_000},
-}
-
-// EstimateCost returns the estimated USD cost of one request.
-func EstimateCost(model string, inputTokens, outputTokens int64) (float64, error) {
-	p, ok := prices[model]
-	if !ok {
-		return 0, fmt.Errorf("no price for model %q", model)
-	}
-	in, out := p.in, p.out
-	if inputTokens > p.longOver {
-		in, out = p.inLong, p.outLong
-	}
-	return (float64(inputTokens)*in + float64(outputTokens)*out) / 1e6, nil
 }

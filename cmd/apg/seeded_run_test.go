@@ -23,6 +23,12 @@ type scriptedClient struct {
 	n     int
 }
 
+// CountTokens answers the budget check with a small count: the scripted
+// run is about the policy, not the budget.
+func (s *scriptedClient) CountTokens(context.Context, anthropic.MessageCountTokensParams) (*anthropic.MessageTokensCount, error) {
+	return &anthropic.MessageTokensCount{InputTokens: 100}, nil
+}
+
 func (s *scriptedClient) New(_ context.Context, _ anthropic.MessageNewParams) (*anthropic.Message, error) {
 	i := s.n
 	s.n++
@@ -79,6 +85,10 @@ func TestSeededRunOnKind(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// This run makes 5 denied calls on purpose. Task 001 stops after 3
+	// (max_policy_violations, T2.2), so raise the limit here: this test is
+	// about the policy, not the budget.
+	tk.Limits.MaxPolicyViolations = 10
 	sb, err := sandbox.NewKind()
 	if err != nil {
 		t.Fatal(err)

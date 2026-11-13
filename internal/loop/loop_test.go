@@ -4,13 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"math"
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/anthropics/anthropic-sdk-go/v2"
 
+	"github.com/tushar-patel28/agent-proving-ground/internal/budget"
 	"github.com/tushar-patel28/agent-proving-ground/internal/sandbox"
 )
 
@@ -20,6 +21,13 @@ type fakeClient struct {
 	responses []string // raw JSON, shaped like real Messages API responses
 	calls     []anthropic.MessageNewParams
 	err       error
+	counts    int // CountTokens calls
+}
+
+// CountTokens answers the pre-call budget check with a small fixed count.
+func (f *fakeClient) CountTokens(context.Context, anthropic.MessageCountTokensParams) (*anthropic.MessageTokensCount, error) {
+	f.counts++
+	return &anthropic.MessageTokensCount{InputTokens: 100}, nil
 }
 
 func (f *fakeClient) New(_ context.Context, p anthropic.MessageNewParams) (*anthropic.Message, error) {
@@ -104,10 +112,11 @@ func (f *fakeSandbox) CopyIn(_ context.Context, host, dst string) (sandbox.Resul
 
 func cfg() Config {
 	return Config{
-		Model:     "claude-haiku-5-5",
-		Goal:      "Fix the bug.",
-		Tools:     []string{"read_file", "write_file", "run_command"},
-		MaxSteps:  10,
+		Model: "claude-haiku-5-5",
+		Goal:  "Fix the bug.",
+		Tools: []string{"read_file", "write_file", "run_command"},
+		Limits: budget.Limits{MaxSteps: 10, MaxTotalTokens: 1_000_000, MaxCostUSD: 1,
+			Timeout: time.Minute, MaxPolicyViolations: 10},
 		MaxTokens: 1000,
 	}
 }
@@ -133,8 +142,12 @@ func TestRunReadWriteEnd(t *testing.T) {
 	if len(res.Steps) != 3 || res.Stop != StopEndTurn {
 		t.Fatalf("steps=%d stop=%q, want 3 end_turn", len(res.Steps), res.Stop)
 	}
-	if res.InputTokens != 450 || res.OutputTokens != 60 {
-		t.Errorf("tokens in=%d out=%d, want 450/60", res.InputTokens, res.OutputTokens)
+	if res.Used.InputTokens != 450 || res.Used.OutputTokens != 60 || res.Used.Steps != 3 {
+		t.Errorf("used = %+v, want 450 in, 60 out, 3 steps", res.Used)
+	}
+	// One token count before each of the three model calls.
+	if client.counts != 3 || res.CountTokensCalls != 3 {
+		t.Errorf("count_tokens calls = %d (result %d), want 3", client.counts, res.CountTokensCalls)
 	}
 	s1, s2, s3 := res.Steps[0], res.Steps[1], res.Steps[2]
 	if s1.Tool != "read_file" || s1.Output != "return a // b\n" || s1.ExitCode == nil || *s1.ExitCode != 0 {
@@ -200,13 +213,13 @@ func TestRunStopsAtMaxSteps(t *testing.T) {
 	}
 	client := &fakeClient{responses: resp}
 	c := cfg()
-	c.MaxSteps = 4
+	c.Limits.MaxSteps = 4
 	res, err := Run(context.Background(), client, &fakeSandbox{}, c, func(sandbox.Result) {})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Stop != StopMaxSteps || len(res.Steps) != 4 || len(client.calls) != 4 {
-		t.Errorf("stop=%q steps=%d calls=%d, want max_steps 4 4", res.Stop, len(res.Steps), len(client.calls))
+	if res.Stop != StopLimit || res.Exit != "budget_steps" || len(res.Steps) != 4 || len(client.calls) != 4 {
+		t.Errorf("stop=%q exit=%q steps=%d calls=%d, want limit budget_steps 4 4", res.Stop, res.Exit, len(res.Steps), len(client.calls))
 	}
 }
 
@@ -327,21 +340,6 @@ func TestAPIErrorIsReturned(t *testing.T) {
 	_, err := Run(context.Background(), &fakeClient{err: errors.New("529 overloaded")}, &fakeSandbox{}, cfg(), func(sandbox.Result) {})
 	if err == nil || !strings.Contains(err.Error(), "529") {
 		t.Errorf("err = %v", err)
-	}
-}
-
-func TestEstimateCost(t *testing.T) {
-	// 100K input is still the normal rate: 0.1 * $0.10 + 1 * $0.50.
-	got, err := EstimateCost("claude-haiku-5-5", 100_000, 1_000_000)
-	if err != nil || math.Abs(got-0.51) > 1e-9 {
-		t.Errorf("100K in + 1M out = %v (err %v), want 0.51", got, err)
-	}
-	long, _ := EstimateCost("claude-haiku-5-5", 200_000, 0) // over 100K: long-prompt rate
-	if math.Abs(long-0.10) > 1e-9 {
-		t.Errorf("200K long-prompt input = %v, want 0.10", long)
-	}
-	if _, err := EstimateCost("unknown-model", 1, 1); err == nil {
-		t.Error("unknown model should be an error")
 	}
 }
 

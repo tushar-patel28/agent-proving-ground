@@ -19,19 +19,28 @@ import (
 // SchemaVersion is written into every trace so readers know the format.
 const SchemaVersion = 0
 
-// Exit reasons: the fixed list from PLAN.md T2.2. Only check_passed,
-// check_failed, and error are used before T2.2.
+// ExitReason says why a run stopped. It is its own type (a string
+// underneath), so a function that takes an ExitReason cannot be handed
+// any other string by mistake. The values are the fixed list from
+// PLAN.md T2.2.
+//
+// check_passed / check_failed: the agent loop ended on its own (the model
+// stopped calling tools, refused, or hit the per-reply max_tokens), and
+// the check decided. The other reasons say which limit stopped the loop;
+// the check still ran (except after error), and the verdict is its result.
+type ExitReason string
+
 const (
-	ReasonCheckPassed          = "check_passed"
-	ReasonCheckFailed          = "check_failed"
-	ReasonBudgetSteps          = "budget_steps"
-	ReasonBudgetTokens         = "budget_tokens"
-	ReasonBudgetCost           = "budget_cost"
-	ReasonTimeout              = "timeout"
-	ReasonPolicyViolationLimit = "policy_violation_limit"
-	ReasonGateRefused          = "gate_refused"
-	ReasonGateDeferred         = "gate_deferred"
-	ReasonError                = "error"
+	ReasonCheckPassed          ExitReason = "check_passed"
+	ReasonCheckFailed          ExitReason = "check_failed"
+	ReasonBudgetSteps          ExitReason = "budget_steps"
+	ReasonBudgetTokens         ExitReason = "budget_tokens"
+	ReasonBudgetCost           ExitReason = "budget_cost"
+	ReasonTimeout              ExitReason = "timeout"
+	ReasonPolicyViolationLimit ExitReason = "policy_violation_limit"
+	ReasonGateRefused          ExitReason = "gate_refused"  // reserved for the human gate (T2.4); not used yet
+	ReasonGateDeferred         ExitReason = "gate_deferred" // reserved for the human gate (T2.4); not used yet
+	ReasonError                ExitReason = "error"         // the harness failed; the check did not run
 )
 
 // Verdicts. Only the harness-run check produces PASS (D11).
@@ -41,32 +50,34 @@ const (
 )
 
 // validReasons is a set: map keys are the members, struct{} takes no memory.
-var validReasons = map[string]struct{}{
+var validReasons = map[ExitReason]struct{}{
 	ReasonCheckPassed: {}, ReasonCheckFailed: {}, ReasonBudgetSteps: {},
 	ReasonBudgetTokens: {}, ReasonBudgetCost: {}, ReasonTimeout: {},
 	ReasonPolicyViolationLimit: {}, ReasonGateRefused: {}, ReasonGateDeferred: {},
 	ReasonError: {},
 }
 
-// ValidExitReason reports whether s is on the fixed list.
+// ValidExitReason reports whether s is on the fixed list. It takes a plain
+// string so it can check values read from a file.
 func ValidExitReason(s string) bool {
-	_, ok := validReasons[s] // ok is true when the key exists
+	_, ok := validReasons[ExitReason(s)] // ok is true when the key exists
 	return ok
 }
 
 // Trace is one run. The `json:"..."` tags set the field names in the file.
 type Trace struct {
-	SchemaVersion int       `json:"schema_version"`
-	RunID         string    `json:"run_id"`
-	TaskID        string    `json:"task_id"` // e.g. "001-fix-function"
-	Pod           string    `json:"pod"`
-	StartedAt     time.Time `json:"started_at"` // time.Time encodes as RFC 3339
-	EndedAt       time.Time `json:"ended_at"`
-	Commands      []Command `json:"commands"` // every host command, in order
-	Steps         []Step    `json:"steps"`    // agent steps; empty without an agent
-	ExitReason    string    `json:"exit_reason"`
-	Verdict       string    `json:"verdict"`
-	Error         string    `json:"error,omitempty"` // harness error; omitempty drops it when ""
+	SchemaVersion int        `json:"schema_version"`
+	RunID         string     `json:"run_id"`
+	TaskID        string     `json:"task_id"` // e.g. "001-fix-function"
+	Pod           string     `json:"pod"`
+	StartedAt     time.Time  `json:"started_at"` // time.Time encodes as RFC 3339
+	EndedAt       time.Time  `json:"ended_at"`
+	Commands      []Command  `json:"commands"`    // every host command, in order
+	Steps         []Step     `json:"steps"`       // agent steps; empty without an agent
+	ExitReason    ExitReason `json:"exit_reason"` // why the run stopped
+	Verdict       string     `json:"verdict"`     // PASS or FAIL: the check's result
+	Check         Check      `json:"check"`
+	Error         string     `json:"error,omitempty"` // harness error; omitempty drops it when ""
 
 	// Agent fields. omitempty leaves them out of --no-agent traces.
 	Model             string  `json:"model,omitempty"`
@@ -74,6 +85,43 @@ type Trace struct {
 	TotalInputTokens  int64   `json:"total_input_tokens,omitempty"`
 	TotalOutputTokens int64   `json:"total_output_tokens,omitempty"`
 	EstimatedCostUSD  float64 `json:"estimated_cost_usd,omitempty"` // from list prices; not a bill
+	Budget            *Budget `json:"budget,omitempty"`             // pointer: nil (omitted) without an agent
+}
+
+// Check is the hidden check's outcome. It runs after every exit except
+// error.
+type Check struct {
+	Ran      bool `json:"ran"`
+	ExitCode *int `json:"exit_code,omitempty"` // nil when it did not run; 0 means PASS
+}
+
+// Budget is the run's limits and what it used (T2.2).
+type Budget struct {
+	Limits       BudgetLimits `json:"limits"`
+	FromContract []string     `json:"from_contract"` // the limits the contract set; the others are harness defaults
+	Used         BudgetUsed   `json:"used"`
+}
+
+// BudgetLimits mirrors budget.Limits, with JSON names.
+type BudgetLimits struct {
+	MaxSteps            int     `json:"max_steps"`
+	MaxTotalTokens      int64   `json:"max_total_tokens"`
+	MaxCostUSD          float64 `json:"max_cost_usd"`
+	TimeoutSeconds      float64 `json:"timeout_seconds"`
+	MaxPolicyViolations int     `json:"max_policy_violations"`
+	MaxReplyTokens      int64   `json:"max_reply_tokens"` // per model reply; the worst case each pre-call check assumes
+}
+
+// BudgetUsed is what the agent loop spent.
+type BudgetUsed struct {
+	Steps            int     `json:"steps"`
+	InputTokens      int64   `json:"input_tokens"`
+	OutputTokens     int64   `json:"output_tokens"`
+	TotalTokens      int64   `json:"total_tokens"`
+	CostUSD          float64 `json:"cost_usd"`
+	AgentSeconds     float64 `json:"agent_seconds"` // wall-clock time of the agent loop
+	PolicyViolations int     `json:"policy_violations"`
+	CountTokensCalls int     `json:"count_tokens_calls"` // pre-call token counts (free API calls, not in the totals)
 }
 
 // Command is one host command the sandbox ran, tagged with the run phase.
@@ -144,7 +192,7 @@ func (t *Trace) Validate() error {
 	if t.TaskID == "" {
 		errs = append(errs, errors.New("task_id is empty"))
 	}
-	if !ValidExitReason(t.ExitReason) {
+	if !ValidExitReason(string(t.ExitReason)) {
 		errs = append(errs, fmt.Errorf("exit_reason %q is not on the fixed list", t.ExitReason))
 	}
 	if t.Verdict != VerdictPass && t.Verdict != VerdictFail {
