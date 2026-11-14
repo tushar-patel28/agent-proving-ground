@@ -15,7 +15,7 @@ Build plan for Tushar Patel's INFO7375 final project. Every chat in this Project
 ## Current status
 
 - **Phase:** 3 — Task suite and evaluation harness
-- **Next task:** T3.4
+- **Next task:** T4.1
 - **Last updated:** Nov 13, 2026
 
 ---
@@ -245,11 +245,18 @@ Goal: one task, one kind pod, one trace file, one PASS/FAIL line.
 2. Each eval-log entry records the model and the contract version.
 - **Done when:** `apg eval --set dev` prints the table.
 
-**T3.4 `apg show <trace>`**
+**T3.4 `apg show <trace>`** ✅ Done Nov 13:
+- **The command:** `apg show <run_id | path> [--full]` reads a v1 trace strictly; a v0 trace gets a notice and its header only.
+- **Header:** run, task, model, prompt version, verdict, exit reason, gate, and budget used/limit.
+- **Per step:** what the model said and asked for, the policy verdict (rule and reason when denied), the commands tagged with the step, marked `[agent]` or `[harness]`, the output cut to 20 lines unless `--full`, whether /workspace changed, and the check runs after it.
+- **At the end:** the harness commands not tied to a step, the final check, and the gate.
+- **Format:** plain text up to 80 columns, colour only on a terminal.
+- **Tests:** golden tests on 4 fixtures, plus `--full`. All 31 evidence traces print without error.
+- **Real use:** shown on the first dev eval's 013 and 014 traces.
 1. Readable step-by-step trace printout in the terminal.
 - **Done when:** `apg show traces/<run_id>.json` prints every step.
 
-**Milestone M3:** suite frozen, eval command works.
+**Milestone M3:** suite frozen, eval command works. (Reached with T3.4 on Nov 13; the milestone row waits for the course-repo sync.)
 
 ---
 

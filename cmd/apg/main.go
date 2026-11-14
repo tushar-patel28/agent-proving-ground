@@ -3,6 +3,7 @@
 //	apg run 001               run the agent, then the hidden check (T1.4)
 //	apg run 001 --no-agent    run only the hidden check (T1.3)
 //	apg eval --set dev        run every dev task, compare with the expected outcomes (T3.3)
+//	apg show <run_id>         print a trace step by step (T3.4)
 package main
 
 import (
@@ -66,8 +67,11 @@ func run(args []string, stdout, stderr io.Writer) int {
 	if len(args) > 0 && args[0] == "eval" {
 		return evalMain(args[1:], stdout, stderr)
 	}
+	if len(args) > 0 && args[0] == "show" {
+		return showMain(args[1:], stdout, stderr)
+	}
 	if len(args) == 0 || args[0] != "run" {
-		fmt.Fprintf(stderr, "%s\n%s\n", usage, evalUsage)
+		fmt.Fprintf(stderr, "%s\n%s\n%s\n", usage, evalUsage, showUsage)
 		return exitError
 	}
 	opts, err := parseRunArgs(args[1:])
