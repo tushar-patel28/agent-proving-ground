@@ -1,0 +1,63 @@
+# 07 — Evidence
+
+Drafted by Claude Code, reviewed by Tushar
+Date: Nov 13, 2026
+Status: started in T3.2 with the frozen split. T5.2 and T6.2 add the evaluation results, their limits, and the controlled failure.
+
+## The dev / held-out split (T3.2)
+
+**Split commit:** written here in the commit after it (see below).
+
+**The rule** (Tushar's decision, driver's seat):
+- 001–005 go to dev, because the model already ran on them on Nov 13, 2026.
+- 006–011 (harder normal tasks): 2 drawn for dev, 4 for held-out.
+- 012–016 (deliberate failure cases): 2 drawn for dev, 3 for held-out.
+- Seed: **42**, chosen by Tushar.
+
+**The draw.** `go run ./scripts/split -seed 42` ran on Nov 13, 2026; the script uses the standard library only.
+- **Method:** within each group, it ranks the tasks by `sha256("<seed>:<task id>")` in ascending hex order, and the first *k* go to dev. The split depends only on the seed, not on a random number generator. Anyone can recompute a rank, e.g. `printf '42:006-ledger-cents' | shasum -a 256` gives `924cb6ea92351ae5…`, as below.
+- **Output:** the script wrote `tasks/split.json` (SHA-256 `19d409d55ba217f34a9d9c57bd835201bba82a1e57f749cff6d04a893ca6320f`) and printed:
+
+```
+tasks 001-005 (5 to dev): the model already ran on them (Nov 13, 2026), so they cannot be held out
+  1. sha256("42:001-fix-function") = 0ac7c95224492405...  -> dev
+  2. sha256("42:002-chunk-list") = 3bda2416b49700f6...  -> dev
+  3. sha256("42:003-slugify") = 5b30e9f1f38c2690...  -> dev
+  4. sha256("42:005-cart-total") = a3e28ff70fd82561...  -> dev
+  5. sha256("42:004-parse-duration") = ba9788608ad07e63...  -> dev
+tasks 006-011 (2 to dev): harder normal tasks: 2 to dev, 4 held out
+  1. sha256("42:009-version-compare") = 15d779d0dc9b78d4...  -> dev
+  2. sha256("42:010-signup-refactor") = 2995b34683eb6236...  -> dev
+  3. sha256("42:008-config-parser") = 304cc09a602ef6ee...  -> held_out
+  4. sha256("42:011-shared-default") = 51db078aa6b354b6...  -> held_out
+  5. sha256("42:007-booking-slots") = 8e095490faa39a9b...  -> held_out
+  6. sha256("42:006-ledger-cents") = 924cb6ea92351ae5...  -> held_out
+tasks 012-016 (2 to dev): deliberate failure cases: 2 to dev, 3 held out
+  1. sha256("42:013-needs-network") = 0c05e4931215a35b...  -> dev
+  2. sha256("42:014-needs-git") = 126e667abb93cb78...  -> dev
+  3. sha256("42:015-tiny-budget") = 6cf40c102ace70c9...  -> held_out
+  4. sha256("42:012-wrong-test") = f128dddb56723f1b...  -> held_out
+  5. sha256("42:016-contradictory-spec") = f52302dc89202300...  -> held_out
+
+dev (9):      [001-fix-function 002-chunk-list 003-slugify 004-parse-duration 005-cart-total 009-version-compare 010-signup-refactor 013-needs-network 014-needs-git]
+held_out (7): [006-ledger-cents 007-booking-slots 008-config-parser 011-shared-default 012-wrong-test 015-tiny-budget 016-contradictory-spec]
+```
+
+**Frozen.** `tasks/split.json` is never edited or redrawn after the split commit (CLAUDE.md).
+- `scripts/split` refuses to overwrite it.
+- `scripts/split/main_test.go` checks that the committed file is exactly the draw for its seed.
+- The split is not redrawn because of where a task lands.
+
+**012-wrong-test is held-out.** It is the planned Phase 6 controlled failure (premortem P1). The controlled-failure runs on it happen after the T5 evaluation runs, and they will be labelled as controlled-failure runs, not evaluation runs.
+
+### Prompt and tool descriptions before the split
+
+The system prompt and tool descriptions last changed in 10abc03 (T2.3). Two changes happened after T1.4:
+- a57fb64 (T2.1): run_command became an argv tool with no shell, and the system prompt describes the permission policy. The no-shell design was partly prompted by the T1.4 run, where the agent sent one shell pipeline through run_command. It is a safety change, not a change made to raise pass rates.
+- 10abc03 (T2.3): the system prompt describes when checks run, and the model is told only "The task is not complete yet." This describes new harness behaviour.
+
+Every model run before this split was on tasks 001–005, which are all in dev. No model has run on any held-out task. No prompt or tool-description change will happen before T5.1.
+
+How this was checked (Nov 13, 2026, code inspection):
+- `git log -G 'systemPrompt =|Description: anthropic.String|NotCompleteNote =' -- internal/loop/loop.go` lists e3454c0 (T1.4), a57fb64 and 10abc03, and nothing after 10abc03.
+- Every trace in `traces/` and `evidence/traces/` has a `task_id` from 001–005. The model runs are all `claude-haiku-5-5`, on 001 (18), 002–005 (4 each). The others are 6 `--no-agent` and 3 scripted runs, all on 001. Test runs write their traces to temporary directories and use fake or scripted clients, never the model.
