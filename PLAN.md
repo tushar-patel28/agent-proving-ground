@@ -15,7 +15,7 @@ Build plan for Tushar Patel's INFO7375 final project. Every chat in this Project
 ## Current status
 
 - **Phase:** 3 — Task suite and evaluation harness
-- **Next task:** T3.2
+- **Next task:** T3.3
 - **Last updated:** Nov 13, 2026
 
 ---
@@ -225,7 +225,11 @@ Goal: one task, one kind pod, one trace file, one PASS/FAIL line.
 1. Include at least 5 deliberate failure cases, each meant to make the system say no. Ideas: a task that tempts editing the tests, a task that needs network, a task that needs a forbidden tool, a task that cannot fit the budget, a task with an impossible spec.
 - **Done when:** every task has a contract, a check, and a one-line purpose in `tasks/README.md`.
 
-**T3.2 Freeze the split (before any prompt tuning)**
+**T3.2 Freeze the split (before any prompt tuning)** ✅ Done Nov 13:
+- **Split commit** `26b5305`: `tasks/split.json` was drawn by `scripts/split` with Tushar's rule and seed 42.
+- **dev (9):** 001–005, 009, 010, 013, 014. **held-out (7):** 006, 007, 008, 011, 012, 015, 016.
+- **Prompt history:** no prompt or tool-description change since 10abc03 (T2.3), and no model has run on a held-out task (docs/07-evidence.md).
+- **012:** 012-wrong-test is held-out, so its Phase 6 controlled-failure runs come after T5 and are labelled as such.
 1. `tasks/split.json`: dev vs held-out.
 2. Commit it. Write the commit hash in `docs/07-evidence.md`.
 - **Done when:** the split commit exists and no prompt tuning happened before it.
@@ -366,6 +370,7 @@ Goal: one task, one kind pod, one trace file, one PASS/FAIL line.
 | D22 | Nov 13 | Stop condition: the check runs after any step that changes /workspace (sha256 fingerprint of every regular file, taken by the harness), and a pass stops the run; the model hears only "The task is not complete yet."; before every check run all pod processes except PID 1 are killed, and the check dir is deleted before the next step; reply cap 4,096 tokens | Decided |
 | D23 | Nov 13 | The gate's outcome goes in the trace's `gate` section, not in `exit_reason`. exit_reason stays the loop's reason, and `gate_refused`/`gate_deferred` stay on the fixed list but are never set. Why: `apg eval` is never interactive, so its gate always defers, and every eval row would otherwise read `gate_deferred`, hiding why the loop stopped. The gate is bound to the SHA-256 of the exact diff shown, and the diff is rebuilt from the pod before export | Decided |
 | D24 | Nov 13 | Trace schema v1: every command says who it was for (actor agent/harness, step), the policy's realpath lookups get phase `policy`, totals live only in budget.used; traces are read back with a strict standard-library decode, and v0 traces stay as they were. "stdin is a terminal" is decided by the tcgetattr ioctl, not the file mode | Decided |
+| D25 | Nov 13 | Dev/held-out split frozen at 26b5305 (seed 42, Tushar's rule; drawn by ranking sha256("<seed>:<task id>") within each group). The split is never redrawn because of where a task lands; 012-wrong-test stays held-out and its Phase 6 runs are labelled controlled-failure runs | Decided |
 
 ---
 

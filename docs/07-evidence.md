@@ -6,7 +6,7 @@ Status: started in T3.2 with the frozen split. T5.2 and T6.2 add the evaluation 
 
 ## The dev / held-out split (T3.2)
 
-**Split commit:** written here in the commit after it (see below).
+**Split commit:** `26b5305` (26b5305680e49e5fee1c955b7824fc0743d5f3a2), "T3.2: freeze dev/held-out split", Nov 13, 2026. This hash was written in the next commit, since a commit cannot contain its own hash.
 
 **The rule** (Tushar's decision, driver's seat):
 - 001–005 go to dev, because the model already ran on them on Nov 13, 2026.
