@@ -190,7 +190,7 @@ Goal: one task, one kind pod, one trace file, one PASS/FAIL line.
   - In 005, the check after step 6 (one file fixed) failed and the check after step 7 passed.
   - Evidence: evidence/traces/20261113T230736Z-5465d81d, …230750Z-8b6ebce6, …230804Z-ac0f7f94, …230821Z-607ddc3e. The pre-fix runs are kept and labelled in docs/trace-schema.md.
   - `001 PASS steps=5 gate=deferred` (20261113T230904Z-3d625236) gives 001 a v1 trace.
-- **M2:** loop, tools, policy, stop and gate all exist with tests. The milestone row waits for the course-repo sync hash.
+- **M2:** loop, tools, policy, stop and gate all exist with tests.
 1. `docs/trace-schema.md`: every field explained.
 2. Add tasks 002–005.
 - **Done when:** all 5 tasks run, and each trace validates against the schema.
@@ -256,7 +256,7 @@ Goal: one task, one kind pod, one trace file, one PASS/FAIL line.
 1. Readable step-by-step trace printout in the terminal.
 - **Done when:** `apg show traces/<run_id>.json` prints every step.
 
-**Milestone M3:** suite frozen, eval command works. (Reached with T3.4 on Nov 13; the milestone row waits for the course-repo sync.)
+**Milestone M3:** suite frozen, eval command works. (Reached with T3.4 on Nov 13.)
 
 ---
 
@@ -401,3 +401,4 @@ Goal: one task, one kind pod, one trace file, one PASS/FAIL line.
 | M0 | Nov 3 | Toolchain works, public repo exists, premortem committed; synced to the course folder | course repo commit 73af1fc (from agent-proving-ground@2a1a722) |
 | M1 | Nov 12 | First slice works end to end on kind (T1.1–T1.4: `apg run 001` PASS with claude-haiku-5-5, evidence/traces/20261112T053055Z-92239eb0.json); synced to the course folder | course repo commit 8349ba9a (from agent-proving-ground@e3454c0) |
 | M2 | Nov 13 | Loop, tools, policy, state, stop, and gate all exist with tests (T2.1–T2.5: tasks 001–005 PASS with claude-haiku-5-5, traces validate against schema v1, evidence/traces/20261113T230736Z-5465d81d … 230904Z-3d625236); synced to the course folder | course repo commit 0429df05 (from agent-proving-ground@cd192a8) |
+| M3 | Nov 13 | Suite frozen, eval command works (T3.1–T3.4: 16 tasks, dev/held-out split frozen at 26b5305; `apg eval --set dev` 7/7 expected-PASS passed and 2/2 failure cases said no, eval 20261114T010304Z-8011b8a0; `apg show` prints every step); synced to the course folder | course repo commit 16227643 (from agent-proving-ground@48ee9c9) |
