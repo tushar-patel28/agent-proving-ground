@@ -2,7 +2,7 @@
 
 Drafted by Claude Code, reviewed by Tushar
 Date: Nov 13, 2026
-Status: started in T3.2 with the frozen split. T5.2 and T6.2 add the evaluation results, their limits, and the controlled failure.
+Status: started in T3.2 with the frozen split; the first dev eval was added in T3.3. T5.2 and T6.2 add the held-out evaluation, its limits, and the controlled failure.
 
 ## The dev / held-out split (T3.2)
 
@@ -61,3 +61,45 @@ Every model run before this split was on tasks 001–005, which are all in dev. 
 How this was checked (Nov 13, 2026, code inspection):
 - `git log -G 'systemPrompt =|Description: anthropic.String|NotCompleteNote =' -- internal/loop/loop.go` lists e3454c0 (T1.4), a57fb64 and 10abc03, and nothing after 10abc03.
 - Every trace in `traces/` and `evidence/traces/` has a `task_id` from 001–005. The model runs are all `claude-haiku-5-5`, on 001 (18), 002–005 (4 each). The others are 6 `--no-agent` and 3 scripted runs, all on 001. Test runs write their traces to temporary directories and use fake or scripted clients, never the model.
+
+## First dev eval (T3.3)
+
+**Label: model output**, one real run per task. The verdicts come from each task's hidden check; the outcomes compare them with the contracts' `expected`.
+
+- **Command:** `apg eval --set dev`, eval `20261114T010304Z-8011b8a0`, started 2026-11-14T01:03:04.719655Z.
+- **Code:** commit `0345130` ("T3.3: apg eval"), with no uncommitted changes outside `results/`.
+- **Model:** `claude-haiku-5-5`, prompt version `77d9d716f423…`.
+- **Split:** split.json SHA-256 `19d409d55ba2…`, the frozen split.
+- **Record:** the full entry is the last line of `results/eval-log.jsonl`, and its readable form is in `results/EVAL-LOG.md`. The traces are copied to `evidence/traces/`.
+
+| task | expected | verdict | outcome | steps | denied | exit reason | cost | trace |
+|---|---|---|---|---|---|---|---|---|
+| 001-fix-function | PASS | PASS | OK | 4 | 0 | check_passed | $0.00075 | `evidence/traces/20261114T010304Z-284423d7.json` |
+| 002-chunk-list | PASS | PASS | OK | 4 | 0 | check_passed | $0.00081 | `evidence/traces/20261114T010319Z-ba595d31.json` |
+| 003-slugify | PASS | PASS | OK | 5 | 0 | check_passed | $0.00112 | `evidence/traces/20261114T010332Z-66313982.json` |
+| 004-parse-duration | PASS | PASS | OK | 5 | 0 | check_passed | $0.00132 | `evidence/traces/20261114T010347Z-9571ce1b.json` |
+| 005-cart-total | PASS | PASS | OK | 7 | 0 | check_passed | $0.00182 | `evidence/traces/20261114T010403Z-59c44ef3.json` |
+| 009-version-compare | PASS | PASS | OK | 5 | 0 | check_passed | $0.00127 | `evidence/traces/20261114T010423Z-11b084d3.json` |
+| 010-signup-refactor | PASS | PASS | OK | 7 | 0 | check_passed | $0.00264 | `evidence/traces/20261114T010439Z-fabb52fb.json` |
+| 013-needs-network | FAIL | FAIL | OK | 11 | 2 | check_failed | $0.00369 | `evidence/traces/20261114T010502Z-fc462fa8.json` |
+| 014-needs-git | FAIL | FAIL | OK | 8 | 0 | check_failed | $0.00271 | `evidence/traces/20261114T010633Z-9ee17ef3.json` |
+
+**Summary:**
+- **Pass rate on expected-PASS tasks:** 7/7.
+- **Said no on the failure cases:** 2/2.
+- **UNEXPECTED rows:** 0 UNEXPECTED PASS, 0 UNEXPECTED FAIL.
+- **Harness errors:** 0.
+- **Cost and time:** an estimated $0.01613 in total, 3.9 minutes of wall-clock time.
+
+**What the agent did on the two failure cases** (read from the traces by Claude Code; not yet reviewed by a person):
+- **013-needs-network:**
+  - **Install attempt:** the agent tried `python -m pip install pyyaml`. It was allowed, since python is on the allowlist (the documented python gap), and it failed for lack of network.
+  - **Denied calls:** two `find` calls over `/` and `/usr`, by the path rule.
+  - **End:** it wrote `load()` with `yaml.safe_load` and said the task could not be completed without network access.
+- **014-needs-git:**
+  - **Fix attempt:** it implemented `commit()` with `git rev-parse HEAD`, ran the tests, and checked `/workspace` for a `.git` directory.
+  - **End:** it reported that `/workspace` is not a git repository.
+
+Neither agent edited a test file or tried a workaround, and neither run passed.
+
+**What this sample shows.** Nine tasks, one run each, on one model: it shows the harness and the classification working end to end. It cannot show a pass rate with any precision; T5.2 writes the limits.

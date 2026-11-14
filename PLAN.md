@@ -15,7 +15,7 @@ Build plan for Tushar Patel's INFO7375 final project. Every chat in this Project
 ## Current status
 
 - **Phase:** 3 — Task suite and evaluation harness
-- **Next task:** T3.3
+- **Next task:** T3.4
 - **Last updated:** Nov 13, 2026
 
 ---
@@ -234,7 +234,13 @@ Goal: one task, one kind pod, one trace file, one PASS/FAIL line.
 2. Commit it. Write the commit hash in `docs/07-evidence.md`.
 - **Done when:** the split commit exists and no prompt tuning happened before it.
 
-**T3.3 `apg eval`**
+**T3.3 `apg eval`** ✅ Done Nov 13:
+- **The command:** `apg eval --set dev|held-out [--runs N]`, on the same code path as `apg run`.
+  - Its gate always defers (eval mode, not stdin), and held-out needs `--held-out-ok`.
+  - It prints the table (task, expected, verdict, outcome, steps, denied, exit reason, cost) and the summary.
+  - It appends to results/eval-log.jsonl and regenerates results/EVAL-LOG.md.
+- **Prompt version:** traces and the log record `prompt_version`.
+- **First dev eval** (commit 0345130, eval 20261114T010304Z-8011b8a0, `claude-haiku-5-5`): 7/7 expected-PASS tasks passed, and the system said no on 2/2 failure cases (013, 014). There were 0 UNEXPECTED rows, at an estimated $0.0161 over 3.9 min (docs/07-evidence.md).
 1. Runs a set of tasks, prints the results table (task, PASS/FAIL, steps, denied (blocked tool calls), exit reason, cost), and appends to `results/eval-log.jsonl`.
 2. Each eval-log entry records the model and the contract version.
 - **Done when:** `apg eval --set dev` prints the table.
