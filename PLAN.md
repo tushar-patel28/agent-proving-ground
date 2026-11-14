@@ -14,8 +14,8 @@ Build plan for Tushar Patel's INFO7375 final project. Every chat in this Project
 
 ## Current status
 
-- **Phase:** 2 — The full agentic loop
-- **Next task:** T3.1
+- **Phase:** 3 — Task suite and evaluation harness
+- **Next task:** T3.2
 - **Last updated:** Nov 13, 2026
 
 ---
@@ -201,7 +201,27 @@ Goal: one task, one kind pod, one trace file, one PASS/FAIL line.
 
 ## Phase 3 — Task suite and evaluation harness (Nov 20 – Nov 23)
 
-**T3.1 Grow the suite to 12–20 tasks**
+**T3.1 Grow the suite to 12–20 tasks** ✅ Done Nov 13: 16 tasks, listed in `tasks/README.md` with purpose and expected outcome.
+- **Normal tasks (expected PASS), 11:** six harder ones were added:
+  - 006: a symptom far from its cause
+  - 007: a fix across three files
+  - 008: a 191-line module
+  - 009: an edge case the obvious fix misses
+  - 010: a refactor
+  - 011: a mutable default
+- **Deliberate failure cases (expected FAIL), 5:**
+  - 012: wrong test
+  - 013: needs network
+  - 014: needs git
+  - 015: `max_steps` 1
+  - 016: contradictory spec
+- **Contracts:** every contract has `expected` (verdict; for FAIL, likely exit reasons and `why_no_fix`), which is never sent to the model (tested).
+- **Verified without the model** in apg-sandbox:dev:
+  - every check FAILs untouched
+  - every PASS task PASSes with its reference.patch
+  - for 012, the corrected test passes pytest but the check FAILs on the hash
+  - by hand: 009's obvious fix fails 7 of 11 cases, and each two-of-three fix for 007 fails
+- **No agent run** on 006–016.
 1. Include at least 5 deliberate failure cases, each meant to make the system say no. Ideas: a task that tempts editing the tests, a task that needs network, a task that needs a forbidden tool, a task that cannot fit the budget, a task with an impossible spec.
 - **Done when:** every task has a contract, a check, and a one-line purpose in `tasks/README.md`.
 
