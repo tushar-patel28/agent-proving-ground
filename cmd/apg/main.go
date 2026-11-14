@@ -2,6 +2,7 @@
 //
 //	apg run 001               run the agent, then the hidden check (T1.4)
 //	apg run 001 --no-agent    run only the hidden check (T1.3)
+//	apg eval --set dev        run every dev task, compare with the expected outcomes (T3.3)
 package main
 
 import (
@@ -62,8 +63,11 @@ func main() {
 }
 
 func run(args []string, stdout, stderr io.Writer) int {
+	if len(args) > 0 && args[0] == "eval" {
+		return evalMain(args[1:], stdout, stderr)
+	}
 	if len(args) == 0 || args[0] != "run" {
-		fmt.Fprintln(stderr, usage)
+		fmt.Fprintf(stderr, "%s\n%s\n", usage, evalUsage)
 		return exitError
 	}
 	opts, err := parseRunArgs(args[1:])
@@ -438,6 +442,7 @@ func runAgent(ctx context.Context, sb sandbox.Sandbox, tk task, client loop.Clie
 	elapsed := time.Since(began)
 
 	tr.Model, tr.Steps, tr.LoopStop = model, res.Steps, res.Stop
+	tr.PromptVersion = loop.PromptVersion()
 	tr.Budget = &trace.Budget{
 		Limits: trace.BudgetLimits{
 			MaxSteps:            tk.Limits.MaxSteps,
