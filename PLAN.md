@@ -290,7 +290,7 @@ Goal: one task, one kind pod, one trace file, one PASS/FAIL line.
 2. Save the results for `docs/07-evidence.md`.
 - **Done when:** every limit has a passing test and the results are saved.
 
-**Milestone M4:** isolation tests pass, results saved. (Reached Nov 17 with T4.1. The course sync is not done yet.)
+**Milestone M4:** isolation tests pass, results saved. (Reached Nov 17 with T4.1.)
 
 ---
 
@@ -429,3 +429,4 @@ Goal: one task, one kind pod, one trace file, one PASS/FAIL line.
 | M1 | Nov 12 | First slice works end to end on kind (T1.1–T1.4: `apg run 001` PASS with claude-haiku-5-5, evidence/traces/20261112T053055Z-92239eb0.json); synced to the course folder | course repo commit 8349ba9a (from agent-proving-ground@e3454c0) |
 | M2 | Nov 13 | Loop, tools, policy, state, stop, and gate all exist with tests (T2.1–T2.5: tasks 001–005 PASS with claude-haiku-5-5, traces validate against schema v1, evidence/traces/20261113T230736Z-5465d81d … 230904Z-3d625236); synced to the course folder | course repo commit 0429df05 (from agent-proving-ground@cd192a8) |
 | M3 | Nov 13 | Suite frozen, eval command works (T3.1–T3.4: 16 tasks, dev/held-out split frozen at 26b5305; `apg eval --set dev` 7/7 expected-PASS passed and 2/2 failure cases said no, eval 20261114T010304Z-8011b8a0; `apg show` prints every step); synced to the course folder | course repo commit 16227643 (from agent-proving-ground@48ee9c9) |
+| M4 | Nov 17 | Isolation tests pass, results saved (T4.1: every pod limit held from inside a real kind pod, with the pids limit D28 and the disk caps D29; evidence/isolation/20261117-isolation.txt and 20261117-isolation-d29.txt); synced to the course folder | course repo commit 1fe748fa (from agent-proving-ground@e95e947) |
