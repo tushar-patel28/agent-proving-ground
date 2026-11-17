@@ -278,6 +278,11 @@ Goal: one task, one kind pod, one trace file, one PASS/FAIL line.
 - **Limits added in this task:**
   - D28: `podPidsLimit: 256` in `sandbox/kind.yaml`, and the cluster was recreated.
   - D29: 32Mi tmpfs `/workspace` and `/tmp`, plus a 64Mi ephemeral-storage limit.
+- **Rerun after D29** at 9eed69c (`evidence/isolation/20261117-isolation-d29.txt`):
+  - all of the above held again;
+  - /workspace and /tmp refused writes past 32 MiB (ENOSPC), and the pod stayed usable;
+  - 96 MiB in /home/apg got the pod evicted after 14 s.
+- **Dev eval after D29** (eval 20261117T234541Z-d3faff4f, at 9eed69c): 7/7 passed, 2/2 said no, 0 UNEXPECTED, est. $0.0147 (docs/07).
 - **Still a documented gap:** the root filesystem is not read-only (docs/03).
 - **Docs:** docs/03, docs/07.
 - **Commit labels:** commits 0a7511a and 84bc3a5 are labelled "T4.4". That label came from a restructure of this phase into T4.1–T4.4 that was reverted the same day. They belong to this task.

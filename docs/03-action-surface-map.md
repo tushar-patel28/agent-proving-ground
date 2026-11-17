@@ -120,9 +120,11 @@ The check cannot tell a cheat from a fix. The gate's diff is where a person woul
 
 ### The pod's limits, and whether they hold (T4.1)
 
-The pod spec (`internal/sandbox/kind.go`) sets most of the limits. The pids limit is a kubelet setting in `sandbox/kind.yaml` (D28), since the pod spec has no field for it. Each limit has a kind test that tries to break it from inside a real pod: `internal/sandbox/isolation_test.go`, plus `TestKindEgressBlocked` from T1.2.
+The pod spec (`internal/sandbox/kind.go`) sets most of the limits. The pids limit is a kubelet setting in `sandbox/kind.yaml` (D28), since the pod spec has no field for it. Each limit has a kind test that tries to break it from inside a real pod: `internal/sandbox/isolation_test.go` and `storage_test.go`, plus `TestKindEgressBlocked` from T1.2.
 
-**Label: fixture output.** The tests ran on Nov 17, 2026, at commit `0a7511a`, on kind v0.33.0 with node v1.37.0 and containerd 2.3.4. The output is saved in `evidence/isolation/20261117-isolation.txt`. Every test passed, and none skipped.
+**Label: fixture output.** Two runs, both on Nov 17, 2026, on kind v0.33.0 with node v1.37.0 and containerd 2.3.4. Every test passed in both, and none skipped.
+- **At `0a7511a`:** the first nine rows (`evidence/isolation/20261117-isolation.txt`).
+- **At `9eed69c`, after D29:** all eleven rows (`evidence/isolation/20261117-isolation-d29.txt`). The first nine rows gave the same results within a few hundredths: CPU 0.506, the memory hog killed at 240 MiB, fork refused after 252.
 
 | Limit | How it is set | What the test tried | Result |
 |---|---|---|---|
@@ -135,19 +137,27 @@ The pod spec (`internal/sandbox/kind.go`) sets most of the limits. The pids limi
 | CPU 500m | container `resources` (requests = limits) | 4 busy processes for 3 s | `cpu.max 50000 100000`; 1.53 CPU-seconds in 3.06 s (0.50 CPUs); 30 throttled periods |
 | Memory 256Mi | container `resources`; swap off (`memory.swap.max 0`) | allocate and fill 16 MiB at a time, capped at 1 GiB | killed at 240 MiB (exit 137); the container was recorded as `OOMKilled` |
 | Processes: 256 per pod | kubelet `podPidsLimit: 256` (`sandbox/kind.yaml`, D28) | fork until it fails, capped at 400 | fork failed with EAGAIN after 252 children; the pod still ran `echo ok` |
+| `/workspace` and `/tmp`: 32 MiB each | in-memory emptyDir volumes (tmpfs), `sizeLimit: 32Mi` (D29) | write 1 MiB at a time to each, capped at 64 MiB | each took 32 MiB, then the write failed with "No space left on device"; a small write worked after cleanup, and the pod still ran `echo ok` |
+| The rest of the disk: 64 MiB | container `ephemeral-storage: 64Mi` (D29) | write 96 MiB to `/home/apg` (the writable layer) | the write succeeded; 14 s later the kubelet evicted the pod (`Failed`, `Evicted`, "Pod ephemeral local storage usage exceeds the total limit of containers 64Mi") |
 
-**Safety.** The memory and fork tests checked their limit first. Neither would have started unless `memory.max` read 268435456 and swap was off, or unless the kubelet's live config (configz) showed `podPidsLimit: 256`. Each also caps itself and runs in its own pod.
+**Safety.** The memory, fork and disk tests checked their limit first. None would have started unless its limit was confirmed:
+- memory: `memory.max` read 268435456 and swap was off;
+- fork: the kubelet's live config (configz) showed `podPidsLimit: 256`;
+- tmpfs fill: `/proc/mounts` showed 32 MiB tmpfs mounts;
+- eviction: the running pod showed the 64Mi limit.
+
+Each also caps itself or writes a fixed amount. The memory, fork and eviction tests each run in their own pod.
 
 **What these tests do not show:**
 - They show the limits from inside the pod. They do not test an escape from the container through a kernel or runtime bug.
 - kind is not a hardened boundary (docs/01).
 - The memory test shows the kill of a process that grows past the limit. Whether the kill takes the whole container depends on the kubelet. Here the container was killed, and `kubectl get pod` read `Running OOMKilled` just after.
-- The two dev evals (bdc7873 and 1e60cbd) ran before the pids limit existed.
+- **Eviction is not a write failure.** It is periodic: the 96 MiB write finished before the kubelet noticed. So a fast writer can pass 64 MiB by whatever it writes in the seconds between checks. An evicted pod ends a run with harness errors. That was not tested end to end.
+- **tmpfs counts against memory.** Files in `/workspace` and `/tmp` use the 256Mi memory limit. Full volumes leave 192 MiB for processes.
+- **Older runs.** The two dev evals before D28 and D29 (bdc7873 and 1e60cbd) ran with no pids limit, no tmpfs volumes and no disk limit. The dev eval at 9eed69c ran with all three (docs/07).
 
-**Not set, documented, and deferred** (Tushar's decision, Nov 17, 2026):
-- **Read-only root filesystem.** `/home/apg`, `/var/tmp` and `/dev/shm` are writable as well as `/workspace` and `/tmp`, so the agent's code can leave files there between steps. The check runs `python -I`, which ignores the user site-packages under `/home/apg`. Proposal: `readOnlyRootFilesystem: true` with emptyDir volumes for `/workspace` and `/tmp`.
-- **Ephemeral storage.** No disk limit, so the agent's code could fill the kind node's disk. Proposal: an `ephemeral-storage` limit and emptyDir `sizeLimit`.
-- Either would change the environment every run sees, so it belongs before a held-out run, like D26 and D28.
+**Not set: a documented gap** (Tushar's decision, Nov 17, 2026):
+- **Read-only root filesystem.** `/home/apg`, `/var/tmp` and `/dev/shm` are writable as well as `/workspace` and `/tmp`, so the agent's code can leave files there between steps. The check runs `python -I`, which ignores the user site-packages under `/home/apg`. Writes there count toward the 64 MiB eviction limit (D29). `/workspace` and `/tmp` are already separate volumes, so the remaining step is `readOnlyRootFilesystem: true`. That would change the environment every run sees, so it belongs before a held-out run.
 
 ### Further gaps in the policy
 
@@ -178,4 +188,4 @@ Gaps the policy has and that nothing tests yet:
   - Allowed, showing the python limit: the symlink creation and the `/etc/hostname` read.
   - The bug was not fixed, so the check failed: `FAIL check_failed`.
 - **Model run**, `apg run 001` with `claude-haiku-5-5`, Nov 13, 2026: `001  PASS  steps=7  reason=check_passed`, `evidence/traces/20261113T204837Z-3a19814c.json`. Its 6 tool calls were all allowed, and none was denied (step 7 was the final reply). The model listed files with `find`, read three files, rewrote `calc/ops.py` with `write_file`, and ran `python -m pytest -q tests/test_ops.py`.
-- **Isolation tests** (fixture output, real kind pods, no model), Nov 17, 2026, at `0a7511a`: `evidence/isolation/20261117-isolation.txt`. All 9 limits in the table above held, and no test was skipped.
+- **Isolation tests** (fixture output, real kind pods, no model), Nov 17, 2026, at `0a7511a`: `evidence/isolation/20261117-isolation.txt`. All 9 limits in the table above held, and no test was skipped. Rerun at `9eed69c` after D29: `evidence/isolation/20261117-isolation-d29.txt`. All 11 rows held.

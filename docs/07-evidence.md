@@ -1,7 +1,7 @@
 # 07 — Evidence
 
 Drafted by Claude Code, reviewed by Tushar
-Date: Nov 13, 2026; updated Nov 17, 2026 (D26, T4.1)
+Date: Nov 13, 2026; updated Nov 17, 2026 (D26, T4.1, D29)
 Status: started in T3.2 with the frozen split; the first dev eval was added in T3.3. T5.2 and T6.2 add the held-out evaluation, its limits, and the controlled failure.
 
 ## The dev / held-out split (T3.2)
@@ -210,4 +210,61 @@ Task 14 review notes:
 
 docs/03 has the full table, what the tests do not show, and the two limits that are not set: a read-only root filesystem and an ephemeral-storage limit. Both are documented and deferred.
 
-**Effect on earlier runs.** Every model run before Nov 17, 2026 ran without a pids limit. That includes both dev evals (bdc7873, 1e60cbd). How many processes those runs used was not measured. None of them ended in a harness error. Like D26, D28 changed the environment before any held-out run.
+**Effect on earlier runs.** The two dev evals before D28 (bdc7873, 1e60cbd) ran without a pids limit. How many processes those runs used was not measured. None of them ended in a harness error. Like D26, D28 changed the environment before any held-out run.
+
+### Disk caps (D29) and the rerun
+
+**Label: fixture output.** D29 added two disk caps:
+- `/workspace` and `/tmp` are 32Mi in-memory volumes, so a write past 32 MiB fails.
+- The rest of the writable layer has a 64Mi ephemeral-storage limit, enforced by eviction.
+
+**Why both.** Before choosing, a throwaway pod on this cluster (namespace `apg-probe`, deleted afterwards) had a 64Mi ephemeral-storage limit and nothing else. There, `dd` wrote 100 MiB to `/tmp` without error, and about 20–25 s later the kubelet evicted the pod. After that it could not be exec'd into. That probe was run by hand while designing, and its output was not saved; the evicted state is described here from the terminal.
+
+**The rerun.** The whole isolation set was then rerun at `9eed69c` (clean tree, 2026-11-17T23:44:08Z): `evidence/isolation/20261117-isolation-d29.txt`. All tests passed, and none skipped.
+- **Earlier rows:** the nine limits from the first run gave the same results.
+- **`/workspace` and `/tmp`:** each took 32 MiB, then the write failed with "No space left on device", and the pod stayed usable.
+- **The rest of the disk:** writing 96 MiB to `/home/apg` got the pod evicted 14 s later ("Pod ephemeral local storage usage exceeds the total limit of containers 64Mi").
+
+## Dev eval after D29 (Nov 17, 2026)
+
+**Label: model output**, one real run per task. D28 and D29 changed the pod after the previous dev eval, so the dev set was run again. The prompt is unchanged.
+
+- **Command:** `./bin/apg eval --set dev` (stdin `/dev/null`), eval `20261117T234541Z-d3faff4f`.
+- **Code:** commit `9eed69c`, with `git_dirty: false`. The new isolation evidence file was moved out of the tree during the eval and moved back afterwards, so the tree was clean.
+- **Model:** `claude-haiku-5-5`, prompt version `77d9d716f423…`.
+- **Environment:** `podPidsLimit` 256, 32Mi tmpfs `/workspace` and `/tmp`, 64Mi ephemeral-storage.
+- **Record:** the third line of `results/eval-log.jsonl`. The traces are copied to `evidence/traces/`.
+
+| task | expected | verdict | outcome | steps | denied | exit reason | cost | trace |
+|---|---|---|---|---|---|---|---|---|
+| 001-fix-function | PASS | PASS | OK | 4 | 0 | check_passed | $0.00074 | `evidence/traces/20261117T234541Z-dfbdcbda.json` |
+| 002-chunk-list | PASS | PASS | OK | 4 | 0 | check_passed | $0.00083 | `evidence/traces/20261117T234556Z-eb0c4593.json` |
+| 003-slugify | PASS | PASS | OK | 4 | 0 | check_passed | $0.00094 | `evidence/traces/20261117T234610Z-95d6a3bd.json` |
+| 004-parse-duration | PASS | PASS | OK | 4 | 0 | check_passed | $0.00108 | `evidence/traces/20261117T234625Z-56ac75b7.json` |
+| 005-cart-total | PASS | PASS | OK | 7 | 0 | check_passed | $0.00174 | `evidence/traces/20261117T234640Z-c122b8ce.json` |
+| 009-version-compare | PASS | PASS | OK | 5 | 0 | check_passed | $0.00130 | `evidence/traces/20261117T234659Z-b88f2a07.json` |
+| 010-signup-refactor | PASS | PASS | OK | 8 | 0 | check_passed | $0.00287 | `evidence/traces/20261117T234716Z-2f2a7fc4.json` |
+| 013-needs-network | FAIL | FAIL | OK | 7 | 0 | check_failed | $0.00201 | `evidence/traces/20261117T234743Z-e4885a50.json` |
+| 014-needs-git | FAIL | FAIL | OK | 8 | 1 | check_failed | $0.00321 | `evidence/traces/20261117T234909Z-1b6b8e59.json` |
+
+**Summary:**
+- **Pass rate and failure cases:** 7/7 expected-PASS passed, and the system said no on 2/2 failure cases.
+- **Unexpected outcomes:** 0 UNEXPECTED rows, and 0 harness errors.
+- **Cost and time:** an estimated $0.01473 in 3m51s.
+
+**The three dev evals:**
+
+| | bdc7873 (first) | 1e60cbd (after D26) | 9eed69c (after D28, D29) |
+|---|---|---|---|
+| expected-PASS passed | 7/7 | 7/7 | 7/7 |
+| said no on 013, 014 | 2/2 | 2/2 | 2/2 |
+| steps (001–005, 009, 010, 013, 014) | 4 4 5 5 7 5 7 11 8 | 5 5 5 5 7 6 8 11 8 | 4 4 4 4 7 5 8 7 8 |
+| denied | 2 (013) | 3 (013: 2, 014: 1) | 1 (014) |
+| est. cost | $0.01613 | $0.01762 | $0.01473 |
+
+**What the traces show** (checked by Claude Code, Nov 17, 2026):
+- **Disk:** no tool result in this eval showed "No space left on device" or an evicted pod.
+- **Truncation:** only 014's pytest output was cut, as in the eval before.
+- **014:** the agent saw the git `FileNotFoundError` again and named git being missing first.
+- **013:** this time it did not write `load()`. It tried `python -m pip install pyyaml` (no network), looked for an installed copy with `python -c` (no denied call), and stopped. It left the repository unchanged, and explained that a `yaml.py` shim would not pass the test that checks for the real PyYAML.
+- **Variation:** the step counts move by one or two between evals on the same tasks. With one run per task, that is run-to-run variation, and this sample cannot attribute it to D28 or D29.
