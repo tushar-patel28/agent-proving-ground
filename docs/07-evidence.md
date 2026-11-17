@@ -1,7 +1,7 @@
 # 07 — Evidence
 
 Drafted by Claude Code, reviewed by Tushar
-Date: Nov 13, 2026
+Date: Nov 13, 2026; updated Nov 17, 2026 (D26)
 Status: started in T3.2 with the frozen split; the first dev eval was added in T3.3. T5.2 and T6.2 add the held-out evaluation, its limits, and the controlled failure.
 
 ## The dev / held-out split (T3.2)
@@ -58,6 +58,8 @@ The system prompt and tool descriptions last changed in 10abc03 (T2.3). Two chan
 
 Every model run before this split was on tasks 001–005, which are all in dev. No model has run on any held-out task. No prompt or tool-description change will happen before T5.1.
 
+**Tool-output formatting changed at D26 (Nov 17, 2026).** The prompt and tool descriptions did not change: prompt_version is still `77d9d716f423…`. What changed is how a long tool result is cut before it goes back to the model. Up to D26 it kept only the first 8,192 bytes. Since D26 it keeps the first 4,096 and the last 4,096 bytes, with a `[... N bytes cut ...]` marker between them. Traces since D26 record this in their `truncation` field, and earlier traces have no such field (docs/trace-schema.md). The change was made before any held-out run.
+
 How this was checked (Nov 13, 2026, code inspection):
 - `git log -G 'systemPrompt =|Description: anthropic.String|NotCompleteNote =' -- internal/loop/loop.go` lists e3454c0 (T1.4), a57fb64 and 10abc03, and nothing after 10abc03.
 - Every trace in `traces/` and `evidence/traces/` has a `task_id` from 001–005. The model runs are all `claude-haiku-5-5`, on 001 (18), 002–005 (4 each). The others are 6 `--no-agent` and 3 scripted runs, all on 001. Test runs write their traces to temporary directories and use fake or scripted clients, never the model.
@@ -70,7 +72,8 @@ How this was checked (Nov 13, 2026, code inspection):
 - **Code:** commit `0345130` ("T3.3: apg eval"), with no uncommitted changes outside `results/`.
 - **Model:** `claude-haiku-5-5`, prompt version `77d9d716f423…`.
 - **Split:** split.json SHA-256 `19d409d55ba2…`, the frozen split.
-- **Record:** the full entry is the last line of `results/eval-log.jsonl`, and its readable form is in `results/EVAL-LOG.md`. The traces are copied to `evidence/traces/`.
+- **Record:** the full entry is the first line of `results/eval-log.jsonl`, and its readable form is in `results/EVAL-LOG.md`. The traces are copied to `evidence/traces/`.
+- **Tool output:** this eval ran with the old head-only truncation (first 8,192 bytes). It is the reason for D26 (PLAN.md decision log).
 
 | task | expected | verdict | outcome | steps | denied | exit reason | cost | trace |
 |---|---|---|---|---|---|---|---|---|

@@ -16,7 +16,7 @@ Build plan for Tushar Patel's INFO7375 final project. Every chat in this Project
 
 - **Phase:** 3 — Task suite and evaluation harness
 - **Next task:** T4.1
-- **Last updated:** Nov 13, 2026
+- **Last updated:** Nov 17, 2026
 
 ---
 
@@ -384,6 +384,7 @@ Goal: one task, one kind pod, one trace file, one PASS/FAIL line.
 | D23 | Nov 13 | The gate's outcome goes in the trace's `gate` section, not in `exit_reason`. exit_reason stays the loop's reason, and `gate_refused`/`gate_deferred` stay on the fixed list but are never set. Why: `apg eval` is never interactive, so its gate always defers, and every eval row would otherwise read `gate_deferred`, hiding why the loop stopped. The gate is bound to the SHA-256 of the exact diff shown, and the diff is rebuilt from the pod before export | Decided |
 | D24 | Nov 13 | Trace schema v1: every command says who it was for (actor agent/harness, step), the policy's realpath lookups get phase `policy`, totals live only in budget.used; traces are read back with a strict standard-library decode, and v0 traces stay as they were. "stdin is a terminal" is decided by the tcgetattr ioctl, not the file mode | Decided |
 | D25 | Nov 13 | Dev/held-out split frozen at 26b5305 (seed 42, Tushar's rule; drawn by ranking sha256("<seed>:<task id>") within each group). The split is never redrawn because of where a task lands; 012-wrong-test stays held-out and its Phase 6 runs are labelled controlled-failure runs | Decided |
+| D26 | Nov 17 | Tool output keeps head and tail: a tool result (and step text/input) over 8,192 bytes keeps its first 4,096 and last 4,096 bytes with `[... N bytes cut ...]` between; before, only the first 8,192 were kept. Made in response to dev run 014 (evidence/traces/20261114T010633Z-9ee17ef3.json, step 6), where the head-only cut dropped pytest's last 544 bytes, which held `FileNotFoundError: ... 'git'`, and the model wrongly concluded /workspace was not a git repository (the check saw the full output; the verdict was right). Made before any held-out run. A harness fix, not a prompt change: the system prompt and tool descriptions are unchanged (prompt_version stays 77d9d716f423, pinned by a test); each trace records the settings in `truncation`. Done now rather than in T5.1 so it does not mix into the contract A vs B comparison. Limit: run_command's exit code, stdout and stderr are cut as one text, so with long stdout and long stderr the end of stdout can still be cut | Decided |
 
 ---
 
