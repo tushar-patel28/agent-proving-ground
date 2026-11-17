@@ -1,7 +1,7 @@
 # 07 — Evidence
 
 Drafted by Claude Code, reviewed by Tushar
-Date: Nov 13, 2026; updated Nov 17, 2026 (D26)
+Date: Nov 13, 2026; updated Nov 17, 2026 (D26, T4.4)
 Status: started in T3.2 with the frozen split; the first dev eval was added in T3.3. T5.2 and T6.2 add the held-out evaluation, its limits, and the controlled failure.
 
 ## The dev / held-out split (T3.2)
@@ -183,3 +183,31 @@ Task 14 review notes:
 - **End:** it wrote `load()` with `yaml.safe_load` and said PyYAML could not be installed. No tool result was cut.
 
 **What this shows.** On the one run where it mattered, the error that the head-only cut had hidden reached the model, and the model's diagnosis named it. This is one run of one task, so it shows that the fix works as intended. It does not measure a change in behaviour. The verdicts did not change, since the check always saw the full output.
+
+## Isolation tests (T4.4)
+
+**Label: fixture output.** These are Go tests on real kind pods, with no model.
+
+- **Command:**
+  ```
+  go test -v -count=1 -run 'TestIsolation|TestKindEgressBlocked|TestKindConfigPidsLimit' ./internal/sandbox/
+  ```
+- **When and where:** 2026-11-17T23:28:12Z, at commit `0a7511a` with no uncommitted changes, on kind v0.33.0 (node v1.37.0, containerd 2.3.4).
+- **Output:** `evidence/isolation/20261117-isolation.txt`. Every test passed, and none skipped.
+- **The cluster:** before the run, it was deleted and recreated from `sandbox/kind.yaml`, which now sets kubelet `podPidsLimit: 256` (D28). `apg-sandbox:dev` was then loaded again. Until then the kubelet's configz read `podPidsLimit: -1` (no limit).
+
+| Limit | Result |
+|---|---|
+| Non-root | `uid=1000`; PID 1 runs as uid 1000; `setuid(0)` EPERM |
+| Capabilities | all five capability sets are zero; `chown` to root and `setgroups([0])` EPERM |
+| No privilege escalation | `NoNewPrivs: 1`, seccomp filter on; the setuid-root `mount` failed; `unshare(CLONE_NEWUSER)` EPERM |
+| Writes outside `/workspace`, `/tmp` | EACCES in `/`, `/etc`, `/usr`, site-packages, `/var`, `/root`, `/opt` and on `/etc/passwd` |
+| No service-account token | no token files; the API server connection timed out |
+| Deny-all egress | the control pod connected; the sandbox timed out on TCP and DNS |
+| CPU 500m | 0.50 CPUs used by 4 busy processes, 30 throttled periods |
+| Memory 256Mi | the hog was killed at 240 MiB (exit 137), container `OOMKilled` |
+| 256 processes per pod | fork failed with EAGAIN after 252 children; the pod recovered |
+
+docs/03 has the full table, what the tests do not show, and the two limits that are not set: a read-only root filesystem and an ephemeral-storage limit. Both are documented and deferred.
+
+**Effect on earlier runs.** Every model run before Nov 17, 2026 ran without a pids limit. That includes both dev evals (bdc7873, 1e60cbd). How many processes those runs used was not measured. None of them ended in a harness error. Like D26, D28 changed the environment before any held-out run.

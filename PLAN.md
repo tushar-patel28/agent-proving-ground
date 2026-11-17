@@ -14,8 +14,8 @@ Build plan for Tushar Patel's INFO7375 final project. Every chat in this Project
 
 ## Current status
 
-- **Phase:** 3 — Task suite and evaluation harness
-- **Next task:** T4.1
+- **Phase:** 5 — Evaluation runs
+- **Next task:** T5.1
 - **Last updated:** Nov 17, 2026
 
 ---
@@ -261,14 +261,36 @@ Goal: one task, one kind pod, one trace file, one PASS/FAIL line.
 
 ---
 
-## Phase 4 — Isolation proof (Nov 24 – Nov 29, light)
+## Phase 4 — kind and isolation proof (Nov 24 – Nov 29, light)
 
-**T4.1 Isolation tests**
+Phase 4 was first written for a Docker-first plan: learn kind, write kind.go, then make the cutoff decision. D16 moved kind to the start, so T4.1 and T4.2 were done in Phases 0–1. T4.4 was added to prove the pod limits hold.
+
+**T4.1 Learn kind basics** ✅ Done Nov 11 as T0.5 (commit 86b7e81): kind cluster from a config file, kubectl run/exec/cp, a locked-down pod spec, and a deny-egress NetworkPolicy enforced.
+
+**T4.2 `internal/sandbox/kind.go`** ✅ Done Nov 11 as T1.2 (commit 74e788d): the same `Sandbox` interface over kubectl via os/exec, one pod per run. `TestKindLifecycle` and `TestKindEgressBlocked` exist, and every run since T1.3 has used kind. There was never a `--sandbox` flag, since only kind exists.
+
+**T4.3 Cutoff decision** ✅ Done Nov 17: kind is the default and the only sandbox, and no Docker fallback ships (D27).
+
+**T4.4 Isolation tests** ✅ Done Nov 17:
+- **Tests:** `internal/sandbox/isolation_test.go` tries to break each pod limit from inside a real kind pod (commit 0a7511a).
+- **Fixture output:** at 0a7511a, every limit held.
+  - non-root: uid 1000, setuid(0) EPERM
+  - capabilities: all sets zero
+  - no privilege escalation: NoNewPrivs 1, setuid `mount` fails, user namespace EPERM
+  - writes outside /workspace and /tmp: EACCES
+  - service-account token: none, API server blocked
+  - egress: blocked
+  - CPU: 0.50 CPUs under load
+  - memory: OOM-killed at 240 MiB
+  - processes: fork EAGAIN after 252
+- **Evidence:** `evidence/isolation/20261117-isolation.txt`; docs/03 and docs/07.
+- **pids limit added (D28):** `podPidsLimit: 256` in `sandbox/kind.yaml`, and the cluster was recreated. The memory and fork tests refuse to start unless their limit is confirmed first.
+- **Not set, documented and deferred:** a read-only root filesystem and an ephemeral-storage limit (docs/03).
 1. One test per sandbox limit: no network, non-root, no service-account token, CPU and memory limits enforced.
 2. Save the results for `docs/07-evidence.md`.
 - **Done when:** every limit has a passing test and the results are saved.
 
-**Milestone M4:** isolation tests pass, results saved.
+**Milestone M4:** isolation tests pass, results saved. (Reached Nov 17 with T4.4. The course sync is not done yet.)
 
 ---
 
@@ -375,7 +397,7 @@ Goal: one task, one kind pod, one trace file, one PASS/FAIL line.
 | D13 | Oct 23 | Personal repo public from the start | Decided |
 | D14 | Nov 3 | Claude Code writes the agent loop (pitch said hand-written; noted in README changes and driver's seat) | Decided |
 | D15 | Nov 3 | Add apg compare, denied column, apg show, FAILURES.md, demo.sh | Decided |
-| D16 | Nov 3 | Kubernetes (kind) from the start; Docker sandbox only as fallback after Nov 12 | Decided |
+| D16 | Nov 3 | Kubernetes (kind) from the start; Docker sandbox only as fallback after Nov 12 | Decided; the fallback was never needed or built (D27) |
 | D17 | Nov 3 | Claude Code drafts packet docs; Tushar reviews | Decided |
 | D18 | Nov 11 | Claude Code implements everything; Tushar reviews and approves | Decided |
 | D19 | Nov 11 | kindnet enforces NetworkPolicy ~1–2 s after Ready; Start probes until egress is blocked (30 s limit, fail and delete pod), probes recorded with Start's commands | Decided |
@@ -386,6 +408,8 @@ Goal: one task, one kind pod, one trace file, one PASS/FAIL line.
 | D24 | Nov 13 | Trace schema v1: every command says who it was for (actor agent/harness, step), the policy's realpath lookups get phase `policy`, totals live only in budget.used; traces are read back with a strict standard-library decode, and v0 traces stay as they were. "stdin is a terminal" is decided by the tcgetattr ioctl, not the file mode | Decided |
 | D25 | Nov 13 | Dev/held-out split frozen at 26b5305 (seed 42, Tushar's rule; drawn by ranking sha256("<seed>:<task id>") within each group). The split is never redrawn because of where a task lands; 012-wrong-test stays held-out and its Phase 6 runs are labelled controlled-failure runs | Decided |
 | D26 | Nov 17 | Tool output keeps head and tail: a tool result (and step text/input) over 8,192 bytes keeps its first 4,096 and last 4,096 bytes with `[... N bytes cut ...]` between; before, only the first 8,192 were kept. Made in response to dev run 014 (evidence/traces/20261114T010633Z-9ee17ef3.json, step 6), where the head-only cut dropped pytest's last 544 bytes, which held `FileNotFoundError: ... 'git'`, and the model wrongly concluded /workspace was not a git repository (the check saw the full output; the verdict was right). Made before any held-out run. A harness fix, not a prompt change: the system prompt and tool descriptions are unchanged (prompt_version stays 77d9d716f423, pinned by a test); each trace records the settings in `truncation`. Done now rather than in T5.1 so it does not mix into the contract A vs B comparison. Limit: run_command's exit code, stdout and stderr are cut as one text, so with long stdout and long stderr the end of stdout can still be cut | Decided |
+| D27 | Nov 17 | T4.3 cutoff decision: kind is the default and the only sandbox; no Docker fallback (`internal/sandbox/docker.go`) is written or ships. Task 001 ran on kind on Nov 12 (M1), and every run since has used kind. Docker is used only to build `apg-sandbox:dev`, and by `cmd/apg/tasks_test.go`, which runs each check against the image without a pod | Decided |
+| D28 | Nov 17 | Kubelet `podPidsLimit: 256` in `sandbox/kind.yaml` (the pod spec has no pids field; until now configz read -1, no limit), so a fork loop from python cannot exhaust the node's PIDs, and the kill loop faces at most 256 processes. The cluster was recreated from the config. It is a harness environment change made before any held-out run; both dev evals ran without it. A read-only root filesystem and an ephemeral-storage limit are documented in docs/03 and deferred (Tushar's decision) | Decided |
 
 ---
 
