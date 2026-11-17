@@ -241,6 +241,7 @@ Goal: one task, one kind pod, one trace file, one PASS/FAIL line.
   - It appends to results/eval-log.jsonl and regenerates results/EVAL-LOG.md.
 - **Prompt version:** traces and the log record `prompt_version`.
 - **First dev eval** (commit 0345130, eval 20261114T010304Z-8011b8a0, `claude-haiku-5-5`): 7/7 expected-PASS tasks passed, and the system said no on 2/2 failure cases (013, 014). There were 0 UNEXPECTED rows, at an estimated $0.0161 over 3.9 min (docs/07-evidence.md).
+- **D26 follow-up (Nov 17):** after the truncation fix (f74abc8), a second dev eval (20261117T230910Z-4e9d72ef) gave the same result: 7/7 passed, 2/2 said no, 0 UNEXPECTED, est. $0.0176 over 3m51s. In 014 the model now saw the `FileNotFoundError` for git (docs/07-evidence.md).
 1. Runs a set of tasks, prints the results table (task, PASS/FAIL, steps, denied (blocked tool calls), exit reason, cost), and appends to `results/eval-log.jsonl`.
 2. Each eval-log entry records the model and the contract version.
 - **Done when:** `apg eval --set dev` prints the table.

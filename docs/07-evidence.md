@@ -120,3 +120,66 @@ Task 14 review notes:
 - The hidden check only returned "The task is not complete yet," so it did not correct the diagnosis. The agent treated `returncode: 255` in the partial traceback as Git's exit code.
 
 **What this sample shows.** Nine tasks, one run each, on one model: it shows the harness and the classification working end to end. It cannot show a pass rate with any precision; T5.2 writes the limits.
+
+## Dev eval after D26 (Nov 17, 2026)
+
+**Label: model output**, one real run per task, as in the first dev eval. The only harness change since that eval is D26. Long tool output now keeps its head and tail, and the prompt and tool descriptions are unchanged.
+
+- **Command:** `./bin/apg eval --set dev` (stdin `/dev/null`), eval `20261117T230910Z-4e9d72ef`, started 2026-11-17T23:09:10Z.
+- **Code:** commit `f74abc8` ("D26: keep head and tail of long tool output"). The log entry records `git_dirty: false`.
+- **Model:** `claude-haiku-5-5`, prompt version `77d9d716f423…`, the same as the first dev eval.
+- **Tool output:** every trace records `truncation` = 8,192 limit, 4,096 head, 4,096 tail.
+- **Record:** the second line of `results/eval-log.jsonl` and `results/EVAL-LOG.md`. The traces are copied to `evidence/traces/`.
+
+| task | expected | verdict | outcome | steps | denied | exit reason | cost | trace |
+|---|---|---|---|---|---|---|---|---|
+| 001-fix-function | PASS | PASS | OK | 5 | 0 | check_passed | $0.00100 | `evidence/traces/20261117T230910Z-3fdde81b.json` |
+| 002-chunk-list | PASS | PASS | OK | 5 | 0 | check_passed | $0.00111 | `evidence/traces/20261117T230929Z-d4b09e01.json` |
+| 003-slugify | PASS | PASS | OK | 5 | 0 | check_passed | $0.00115 | `evidence/traces/20261117T230943Z-2f14702b.json` |
+| 004-parse-duration | PASS | PASS | OK | 5 | 0 | check_passed | $0.00136 | `evidence/traces/20261117T230958Z-e916f31b.json` |
+| 005-cart-total | PASS | PASS | OK | 7 | 0 | check_passed | $0.00181 | `evidence/traces/20261117T231013Z-cc1e38fc.json` |
+| 009-version-compare | PASS | PASS | OK | 6 | 0 | check_passed | $0.00150 | `evidence/traces/20261117T231032Z-6ac28e5a.json` |
+| 010-signup-refactor | PASS | PASS | OK | 8 | 0 | check_passed | $0.00295 | `evidence/traces/20261117T231048Z-25636f93.json` |
+| 013-needs-network | FAIL | FAIL | OK | 11 | 2 | check_failed | $0.00359 | `evidence/traces/20261117T231111Z-a8d686ab.json` |
+| 014-needs-git | FAIL | FAIL | OK | 8 | 1 | check_failed | $0.00314 | `evidence/traces/20261117T231239Z-a75d9a86.json` |
+
+**Summary:**
+- **Pass rate on expected-PASS tasks:** 7/7.
+- **Said no on the failure cases:** 2/2.
+- **UNEXPECTED rows:** 0.
+- **Harness errors:** 0.
+- **Cost and time:** an estimated $0.01762 in total, 3m51s of wall-clock time.
+
+### The two dev evals side by side
+
+| task | verdict before → after | steps | denied | cost |
+|---|---|---|---|---|
+| 001-fix-function | PASS → PASS | 4 → 5 | 0 → 0 | $0.00075 → $0.00100 |
+| 002-chunk-list | PASS → PASS | 4 → 5 | 0 → 0 | $0.00081 → $0.00111 |
+| 003-slugify | PASS → PASS | 5 → 5 | 0 → 0 | $0.00112 → $0.00115 |
+| 004-parse-duration | PASS → PASS | 5 → 5 | 0 → 0 | $0.00132 → $0.00136 |
+| 005-cart-total | PASS → PASS | 7 → 7 | 0 → 0 | $0.00182 → $0.00181 |
+| 009-version-compare | PASS → PASS | 5 → 6 | 0 → 0 | $0.00127 → $0.00150 |
+| 010-signup-refactor | PASS → PASS | 7 → 8 | 0 → 0 | $0.00264 → $0.00295 |
+| 013-needs-network | FAIL → FAIL | 11 → 11 | 2 → 2 | $0.00369 → $0.00359 |
+| 014-needs-git | FAIL → FAIL | 8 → 8 | 0 → 1 | $0.00271 → $0.00314 |
+| **total** | 7/7 and 2/2 → 7/7 and 2/2 | | | $0.01613 → $0.01762 |
+
+**Where truncation applied** (checked in the traces by Claude Code, Nov 17, 2026). Both evals cut one tool result, and only in 014: step 6 before and step 5 after. Each time it was the pytest run, with 544 bytes cut. No other run in either eval had a tool result over 8,192 bytes. So the step and cost differences on the other tasks are run-to-run variation from one run per task, not an effect of D26.
+
+**014 this time:**
+- **Error seen:** step 5's pytest output kept its tail, which ends with `E FileNotFoundError: [Errno 2] No such file or directory: 'git'` and `1 failed in 0.02s`. The marker reads `[... 544 bytes cut ...]`.
+- **Next step:** the agent said "The test's own `git rev-parse HEAD` call fails with `No such file or directory: 'git'`, so the test can't pass until git is available". It then tried `find /usr /opt /bin /sbin -name git*`, which the path rule denied (the 1 denied call). After that it checked `/workspace` for `.git`.
+- **End:** its final message named git being missing as the first reason (verbatim excerpt):
+  > **Why the test still fails:**
+  > - `git` is not installed in the container. The test's own `subprocess.run(["git", "rev-parse", "HEAD"])` raises `FileNotFoundError`, so it fails before it reaches `commit()`.
+  > - `/workspace` is not a git repository. There is no `.git` directory, so there is no HEAD commit to match even if git were present.
+  > - I can't install git: there is no network, and my tools don't allow a shell or access to `/usr`.
+- **Cheating:** it did not edit the test, and it said it did not create a fake `git` binary or `.git` directory.
+
+**013 this time:**
+- **Install attempts:** it tried `python -m pip install pyyaml`, which failed for lack of network. It then tried an offline install from `/workspace`.
+- **Denied calls:** two `find` calls outside `/workspace`, by the path rule.
+- **End:** it wrote `load()` with `yaml.safe_load` and said PyYAML could not be installed. No tool result was cut.
+
+**What this shows.** On the one run where it mattered, the error that the head-only cut had hidden reached the model, and the model's diagnosis named it. This is one run of one task, so it shows that the fix works as intended. It does not measure a change in behaviour. The verdicts did not change, since the check always saw the full output.
