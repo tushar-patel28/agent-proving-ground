@@ -1,8 +1,8 @@
 # 03 — Action surface map
 
 Drafted by Claude Code, reviewed by Tushar
-Date: Nov 13, 2026 (updated for T2.3, T2.4 and T2.5 the same day; T4.4 on Nov 17, 2026)
-Status: T2.1 draft, with T2.3's stop condition, T2.4's gate and T4.4's isolation tests. T6.2 finishes this doc and docs/05-gates.md.
+Date: Nov 13, 2026 (updated for T2.3, T2.4 and T2.5 the same day; T4.1 on Nov 17, 2026)
+Status: T2.1 draft, with T2.3's stop condition, T2.4's gate and T4.1's isolation tests. T6.2 finishes this doc and docs/05-gates.md.
 
 This lists every action the agent can take, what the permission policy (`internal/policy`) checks before the action runs, and what the policy cannot stop. Every tool call goes through `policy.Check` before it runs. A denied call is never executed. It is written into the trace as a step with `verdict: "denied"`, the `rule`, and the `reason`, and the model gets that reason as an error result.
 
@@ -118,7 +118,7 @@ The check cannot tell a cheat from a fix. The gate's diff is where a person woul
 
 **python and pytest run arbitrary code.** Both are on the allowlist, and both run code the agent controls: `python -c`, a script, a test file, a `conftest.py`, any imported module. That code runs as the pod's user (uid 1000). It can read outside `/workspace`, create symlinks, delete files, and start other programs. The policy sees only the command line. The seeded run shows this: `python -c` created a symlink `etc-link → /etc` and read `/etc/hostname`, and both calls were allowed. So the policy makes the allowlist meaningful for the other nine programs and for the file tools, and it records every decision. **It is not the security boundary. The pod's isolation is the outer boundary.**
 
-### The pod's limits, and whether they hold (T4.4)
+### The pod's limits, and whether they hold (T4.1)
 
 The pod spec (`internal/sandbox/kind.go`) sets most of the limits. The pids limit is a kubelet setting in `sandbox/kind.yaml` (D28), since the pod spec has no field for it. Each limit has a kind test that tries to break it from inside a real pod: `internal/sandbox/isolation_test.go`, plus `TestKindEgressBlocked` from T1.2.
 
@@ -164,7 +164,7 @@ Gaps the policy has and that nothing tests yet:
   All of this happens before the agent's next step, so no agent process is alive while the check exists. A seeded run on kind showed this: the agent left a "tamperer" running that kept overwriting any check it found with `exit 0`. The kill removed it before the check was copied in, the check failed honestly, and python found no check directory at the next step. The model is told only `The task is not complete yet.`, never the check's output.
 - **The agent's code runs inside the check.** pytest imports the package under test, so that code could read the check while it runs and copy it into `/workspace`. Each check run records `changed_workspace`, but nothing prevents the copy short of running the check as another user. `check.sh` runs python with `-B` so the check itself writes no `__pycache__` files into `/workspace`. Without it, `-I` ignored the image's `PYTHONDONTWRITEBYTECODE`, and every check left `.pyc` files the agent could see (found in T2.3). Every check run also deletes Python bytecode from `/workspace` after the kill and before the check: every `__pycache__` directory (T2.4), and since T2.5 every other `*.pyc` file or symlink. So a `.pyc` the agent planted cannot stand in for the source, including a bare `calc/ops.pyc` with no `ops.py`, which Python's sourceless loader would import. The fingerprint and the gate's diff ignore `__pycache__` and `.pytest_cache`. A bare `.pyc` is still in the fingerprint, so planting one triggers a check, which then deletes it. In the gate's diff it shows as a WARNING line. Not checked: bytecode under another name (Python only loads `.pyc` for imports, but code the agent wrote could load anything at run time, as with python itself).
 - **What the fingerprint sees.** It covers the sha256 of every regular file (`find /workspace -type f -exec sha256sum`). A step that only adds a symlink or an empty directory does not count as a change and runs no check. The final check still runs.
-- **Kill limits.** The kill loop makes 20 passes of `kill(-1, SIGKILL)`. A process that forks faster than that could survive, and the run then ends as a harness error rather than running the check. Since D28, the pod cannot hold more than 256 processes (tested in T4.4), so a fork loop is bounded. Whether 20 passes always beat one was not tested.
+- **Kill limits.** The kill loop makes 20 passes of `kill(-1, SIGKILL)`. A process that forks faster than that could survive, and the run then ends as a harness error rather than running the check. Since D28, the pod cannot hold more than 256 processes (tested in T4.1), so a fork loop is bounded. Whether 20 passes always beat one was not tested.
 - **The test file is writable on purpose.** `tests/test_ops.py` is inside `/workspace`, so `write_file` may change it. The check's SHA-256 of the test file catches that (`check.sh`, T1.1). This is the Phase 6 controlled failure (premortem P1), so the policy must not hide it.
 - **Long-running processes.** `timeout 60` stops the command it starts. A background process forked by python can keep running between steps. Since T2.3 it is killed before every check run, including the final one. In the T2.2 timeout test on kind, the leftover `sleep 30` was killed before the final check.
 

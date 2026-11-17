@@ -1,7 +1,7 @@
 # 07 — Evidence
 
 Drafted by Claude Code, reviewed by Tushar
-Date: Nov 13, 2026; updated Nov 17, 2026 (D26, T4.4)
+Date: Nov 13, 2026; updated Nov 17, 2026 (D26, T4.1)
 Status: started in T3.2 with the frozen split; the first dev eval was added in T3.3. T5.2 and T6.2 add the held-out evaluation, its limits, and the controlled failure.
 
 ## The dev / held-out split (T3.2)
@@ -184,7 +184,7 @@ Task 14 review notes:
 
 **What this shows.** On the one run where it mattered, the error that the head-only cut had hidden reached the model, and the model's diagnosis named it. This is one run of one task, so it shows that the fix works as intended. It does not measure a change in behaviour. The verdicts did not change, since the check always saw the full output.
 
-## Isolation tests (T4.4)
+## Isolation tests (T4.1)
 
 **Label: fixture output.** These are Go tests on real kind pods, with no model.
 
