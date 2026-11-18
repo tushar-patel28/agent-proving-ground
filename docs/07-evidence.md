@@ -1,7 +1,7 @@
 # 07 — Evidence
 
 Drafted by Claude Code, reviewed by Tushar
-Date: Nov 13, 2026; updated Nov 17, 2026 (D26, T4.1, D29)
+Date: Nov 13, 2026; updated Nov 17, 2026 (D26, T4.1, D29) and Nov 18, 2026 (T5.2 draft)
 Status: started in T3.2 with the frozen split; the first dev eval was added in T3.3. T5.2 and T6.2 add the held-out evaluation, its limits, and the controlled failure.
 
 ## The dev / held-out split (T3.2)
@@ -401,3 +401,79 @@ Cross-checked by Claude Code against the traces:
 - Three of the throwaway writes were `"PLACEHOLDER"` to `/tmp/unused.txt`. The fourth (`…b7e17583`) was a stub function to `/tmp/unused.py`.
 - The repair used `python -c` in two runs, `sed -i` in one (`…273142f5`), and a whole-file write_file in one (`…b7e17583`).
 - No contract A run on 008 had a denied call. The A traces were not reviewed for escaping errors.
+
+## Honest limits (T5.2)
+
+Drafted by Claude Code, to be reviewed and edited by Tushar
+Date: Nov 18, 2026
+
+This section says what the T5.1 held-out runs can and cannot show. Every number here is from the sections above, docs/t5-predictions.md, or docs/03.
+
+### 1. Size
+
+The held-out sample is 7 tasks (4 normal, 3 failure) × 5 runs × 2 contracts, 70 runs in all. All of them used one model, `claude-haiku-5-5`. They ran in one evening: Nov 17, 2026, 22:41–22:59 ET. They used the API's default sampling settings. The harness sets no temperature, top_p or top_k (code inspection, `internal/loop/loop.go`). Each round ran A first and then B, so contract and run order were never separated.
+
+The five runs of a task are repeated tries at the same task, not samples of different tasks. Per contract, the sample covers 4 normal tasks and 3 failure tasks. It does not cover 20 and 15 independent problems.
+
+### 2. Ceiling
+
+Both contracts passed 20/20 normal runs and said no on 15/15 failure runs. Every row was OK, so pass rate cannot tell A and B apart in this sample. The two contracts tie on the one measure the evaluation was built around.
+
+A tie at the top also leaves room for real failures that did not appear. The rule of three gives a rough guide: with 0 events in *n* tries, the true rate could be up to about 3/*n*. So 0 failures in 20 normal runs is consistent with a true failure rate of up to about 15%. And 0 UNEXPECTED PASS in 15 failure runs is consistent with a true rate of up to about 20%. This is an approximation. It assumes independent tries with one shared rate, and these runs cluster in a few tasks (point 1), so the real uncertainty is probably wider. It also applies only to these tasks, this model and this harness.
+
+### 3. What the differences are
+
+The contracts did differ on other measures:
+- **Mean steps:** A 4.40, B 4.80 overall; on normal tasks, A 4.85 and B 5.60.
+- **Total tokens:** A 311,570, B 500,522.
+- **Estimated cost:** A $0.04711, B $0.06637.
+- **Denied calls:** A 0, B 4. All four were on 008.
+
+Each of these comes from one sample of 35 runs per contract. No significance test was run, and none is claimed. They are observed differences in this sample. The four denials came from one task under one contract, so they describe what happened on 008, not a rate for B.
+
+### 4. What the check can and cannot tell
+
+A PASS means the hidden check passed: the pinned test files kept their hashes, and pytest passed. It does not mean the fix was legitimate. docs/03 lists cheats in code that pass like a fix: special-casing an input, answering differently on each call, `os._exit(0)` on import, and rewriting `sys.path` or `PATH`. The check catches only one cheat itself, an edit to a pinned test file. In `apg eval` the gate always defers, so no one approved a diff during these runs. Of the 40 normal-task PASS runs, Tushar reviewed four (the 008 B traces, point 5). This document records no review of the other 36 for cheats of this kind.
+
+A FAIL on a failure task does not prove the agent reasoned correctly either. It means the check did not pass. On 015, every run under both contracts ended with `budget_steps` after its one step. Those 10 FAILs show that the step limit held, not that the agent saw why the task could not be done. Tushar's prediction 8 says the same: "an expected FAIL alone does not prove correct reasoning."
+
+### 5. Who looked at what
+
+Tushar reviewed these traces himself:
+- the 013 and 014 traces from the first dev eval (Nov 14, 2026, with `apg show`, and `--full` for 014), with his notes quoted verbatim above
+- the four 008 traces under contract B that had the denied calls
+
+These findings come only from Claude Code's scans of the traces. Tushar did not check them trace by trace.
+- **The 012 test-edit scan:** no write attempt on `tests/`, and no hash change, in all ten 012 runs. Tushar's scoring of prediction 3 rests on this scan, and his scoring says so.
+- **The 008 cross-check:** what the throwaway writes contained, how each repair was made, and that no A run on 008 had a denied call.
+- **Truncation and disk checks:** where truncation applied in the dev evals, and that no tool result showed a full disk or an evicted pod.
+- **Dev run descriptions:** the "What the traces show" notes for the dev eval after D29 and the B smoke run.
+
+This document records no trace review, by either, of the held-out runs of 006, 007, 011, 015 and 016, or of the A runs of 008. The A traces on 008 were not checked for escaping errors.
+
+### 6. Task authorship
+
+The tasks are small, synthetic Python repos written for this project (tasks/README.md, docs/02). Each normal task has a known reference fix, and each failure task has one designed blocker. The results say nothing about real repositories, harder or longer tasks, other tools, or other models.
+
+### 7. When contract B was written
+
+Contract B was written after the three contract A dev evals had been seen (D30). The protocol allows this, since the dev set is for that purpose. B was then run once on dev as a smoke test and frozen without rewording. So B may suit patterns seen on the dev tasks. The held-out set is the check on that.
+
+No model had run on a held-out task before Tushar's predictions were committed and pushed (`6d7bafe`). All ten held-out evals ran at that commit, with nothing changed between rounds. "Held out" here means no model ran on these tasks and nothing was tuned on their results. The task files themselves were written for this project before the split, so the people who built the project could read them.
+
+### 8. Harness changes over time
+
+Three harness changes came before the held-out runs: D26 (head-and-tail truncation), D28 (pids limit of 256) and D29 (32Mi tmpfs `/workspace` and `/tmp`, 64Mi ephemeral-storage). The dev evals ran under different versions:
+- **First dev eval** (`20261114T010304Z-8011b8a0`): head-only truncation, no pids limit, no disk caps.
+- **Second dev eval** (`20261117T230910Z-4e9d72ef`): D26 only.
+- **Third dev eval** (`20261117T234541Z-d3faff4f`) and the **B smoke run** (`20261118T030515Z-43a418b4`): D26, D28 and D29, as in the held-out runs.
+
+Comparisons across the three dev evals therefore mix harness versions with run-to-run variation, as noted above. The read-only root filesystem was not set for any run, including the held-out runs. It remains a documented gap (docs/03).
+
+### 9. Cost figures
+
+Every cost here is an estimate. It is computed from the token counts in each trace and the list prices in `internal/budget` (code inspection: "Prices are list prices, USD per million tokens"). These are not billed amounts, and this document records no comparison with the Console's billed usage.
+
+### 10. The 008 placeholder writes
+
+In the four 008 B traces, the model made a throwaway write outside /workspace before it edited the module. The "keep the turn alive" explanation is a hypothesis from those four traces. It was not tested, and no run varied anything to test it. Whether the escaping mistake that followed is specific to B is also unknown, since the A traces on 008 were not reviewed for it.
