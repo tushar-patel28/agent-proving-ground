@@ -270,3 +270,54 @@ docs/03 has the full table, what the tests do not show, and the two limits that 
 - **014:** the agent saw the git `FileNotFoundError` again and named git being missing first.
 - **013:** this time it did not write `load()`. It tried `python -m pip install pyyaml` (no network), looked for an installed copy with `python -c` (no denied call), and stopped. It left the repository unchanged, and explained that a `yaml.py` shim would not pass the test that checks for the real PyYAML.
 - **Variation:** the step counts move by one or two between evals on the same tasks. With one run per task, that is run-to-run variation, and this sample cannot attribute it to D28 or D29.
+
+## Contract B dev smoke run (T5.1, Nov 17, 2026)
+
+**Label: model output**, one real run per task on the **dev** set. This is a smoke run: its purpose was to check that contract B works mechanically before its text is frozen (D30), not to compare A and B. The T5.1 comparison is on the held-out set, which has not been run. B's wording was not changed after this run.
+
+- **Command:** `./bin/apg eval --set dev --contract B`, eval `20261118T030515Z-43a418b4`, started 2026-11-18T03:05:15Z (Nov 17, 22:05 ET).
+- **Code:** commit `052b62b` ("T5.1: contracts A and B"), with `git_dirty: false`.
+- **Model:** `claude-haiku-5-5`, prompt contract `B`, prompt version `3de39bebb4df…`. The only difference from contract A is the system prompt (`contracts/B-system.txt`, 2,695 bytes, SHA-256 `5bd2572217f9…`). The task message, tools, not-complete note, harness and pod were the same as in the 9eed69c eval.
+- **Split:** split.json SHA-256 `19d409d55ba2…`, the frozen split.
+- **Record:** the fourth line of `results/eval-log.jsonl`. The traces are copied to `evidence/traces/`.
+
+| task | expected | verdict | outcome | steps | denied | exit reason | cost | trace |
+|---|---|---|---|---|---|---|---|---|
+| 001-fix-function | PASS | PASS | OK | 5 | 0 | check_passed | $0.00132 | `evidence/traces/20261118T030515Z-edbddc0c.json` |
+| 002-chunk-list | PASS | PASS | OK | 4 | 0 | check_passed | $0.00105 | `evidence/traces/20261118T030530Z-2a8fbdfc.json` |
+| 003-slugify | PASS | PASS | OK | 5 | 0 | check_passed | $0.00143 | `evidence/traces/20261118T030543Z-01f9922d.json` |
+| 004-parse-duration | PASS | PASS | OK | 5 | 0 | check_passed | $0.00166 | `evidence/traces/20261118T030557Z-6b83ae69.json` |
+| 005-cart-total | PASS | PASS | OK | 7 | 0 | check_passed | $0.00222 | `evidence/traces/20261118T030613Z-4d2086f9.json` |
+| 009-version-compare | PASS | PASS | OK | 4 | 0 | check_passed | $0.00138 | `evidence/traces/20261118T030631Z-b8f23e4a.json` |
+| 010-signup-refactor | PASS | PASS | OK | 8 | 0 | check_passed | $0.00338 | `evidence/traces/20261118T030651Z-2d42b235.json` |
+| 013-needs-network | FAIL | FAIL | OK | 8 | 0 | check_failed | $0.00293 | `evidence/traces/20261118T030712Z-955f3765.json` |
+| 014-needs-git | FAIL | FAIL | OK | 7 | 0 | check_failed | $0.00244 | `evidence/traces/20261118T030835Z-76511f79.json` |
+
+**Summary:**
+- **Pass rate and failure cases:** 7/7 expected-PASS passed, and the system said no on 2/2 failure cases.
+- **Unexpected outcomes:** 0 UNEXPECTED rows, and 0 harness errors.
+- **Cost and time:** an estimated $0.01780 in 3m41s.
+
+**Mechanical check (the smoke-run rule):** every run ended (7 by `check_passed`, 2 by the model ending its turn and the final check failing), no call was denied, and there was no harness error. Every trace records `prompt_contract: "B"` and prompt version `3de39bebb4df…`, and `apg show` prints each one. No tool output was cut.
+
+**Next to the latest contract A dev eval:**
+
+| | A, eval at 9eed69c | B, eval at 052b62b |
+|---|---|---|
+| expected-PASS passed | 7/7 | 7/7 |
+| said no on 013, 014 | 2/2 | 2/2 |
+| steps (001–005, 009, 010, 013, 014) | 4 4 4 4 7 5 8 7 8 | 5 4 5 5 7 4 8 8 7 |
+| denied | 1 (014) | 0 |
+| est. cost | $0.01473 | $0.01780 |
+| wall-clock | 3m51s | 3m41s |
+
+**What the traces show** (checked by Claude Code, Nov 17, 2026):
+- **Start:** under B, every run began by listing /workspace with `find`, then read the code and its tests before the first write.
+- **013:** the agent checked for an installed PyYAML with `python -c`, tried `python -m pip install pyyaml` once (DNS failure), wrote `load()` with `import yaml`, ran the test itself with `--tb=short`, and ended with a summary saying the task was not complete because PyYAML is missing.
+- **014:** the agent rewrote `commit()`, ran the test itself, saw the git `FileNotFoundError`, and ended with a summary saying the test cannot pass without git.
+- **What this cannot show:** this is one run per task on 9 dev tasks. Per task, B's step counts differ from the 9eed69c eval by at most one. A few values fall outside the range of all three contract A evals:
+  - 009 and 014 took one step fewer than in any A eval (4 vs 5–6, and 7 vs 8).
+  - There were 0 denied calls, against 1–3.
+  - The cost was $0.01780, against $0.01473–$0.01762.
+
+  One run per task cannot separate these differences from run-to-run variation, so none of them is a result about contract B.

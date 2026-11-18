@@ -15,7 +15,7 @@ Build plan for Tushar Patel's INFO7375 final project. Every chat in this Project
 ## Current status
 
 - **Phase:** 5 — Evaluation runs
-- **Next task:** T5.1
+- **Next task:** T5.1 part 2 (held-out runs, contracts A and B)
 - **Last updated:** Nov 17, 2026
 
 ---
@@ -300,6 +300,12 @@ Goal: one task, one kind pod, one trace file, one PASS/FAIL line.
 1. Write contract A and contract B (for example, terse vs detailed instructions).
 2. Run both on the held-out set, at least 3 runs each, same model and settings.
 - **Done when:** the eval log holds both, with pass rates side by side.
+- **Part 1 done Nov 17** (step 1, not step 2):
+  - **Contracts:** `contracts/A-system.txt` (the system prompt used since 10abc03, byte for byte) and `contracts/B-system.txt` (Tushar's text, D30). Only the system prompt differs.
+  - **Flag:** `apg run` and `apg eval` take `--contract A|B` (default A), and traces and eval-log lines record `prompt_contract`.
+  - **Prompt versions:** A `77d9d716f423…` (unchanged), B `3de39bebb4df…`. Code commit `052b62b`.
+  - **B dev smoke run** (eval 20261118T030515Z-43a418b4, at 052b62b): 7/7 passed, 2/2 said no, 0 UNEXPECTED, 0 denied, 0 harness errors, est. $0.0178. No mechanical problem, and B was not reworded (docs/07).
+  - **Not yet:** the held-out runs (step 2).
 
 **T5.2 Honest limits**
 1. In `docs/07-evidence.md`, write what a sample of this size can and cannot show.
@@ -411,6 +417,7 @@ Goal: one task, one kind pod, one trace file, one PASS/FAIL line.
 | D27 | Nov 17 | Cutoff decision (T4.3 of the original Docker-first plan, commit 96375d2): kind is the default and the only sandbox; no Docker fallback (`internal/sandbox/docker.go`) is written or ships. Task 001 ran on kind on Nov 12 (M1), and every run since has used kind. Docker is used only to build `apg-sandbox:dev`, and by `cmd/apg/tasks_test.go`, which runs each check against the image without a pod | Decided |
 | D28 | Nov 17 | Kubelet `podPidsLimit: 256` in `sandbox/kind.yaml` (the pod spec has no pids field; until now configz read -1, no limit), so a fork loop from python cannot exhaust the node's PIDs, and the kill loop faces at most 256 processes. The cluster was recreated from the config. It is a harness environment change made before any held-out run; both dev evals ran without it. A read-only root filesystem is documented in docs/03 and deferred (Tushar's decision); for disk see D29 | Decided |
 | D29 | Nov 17 | Disk is capped two ways. /workspace and /tmp are in-memory emptyDir volumes (tmpfs) with sizeLimit 32Mi each: the kernel refuses a write past it (ENOSPC), and the pod keeps working. The rest of the container's writable layer (/home/apg, /var/tmp, ...) has an ephemeral-storage limit of 64Mi, which the kubelet enforces by evicting the pod some seconds after it is passed. Why both: tested on the cluster, an ephemeral-storage limit alone did not stop a write (100 MiB past 64Mi succeeded); the pod was evicted ~20 s later and could not be used. So only a kernel-enforced size can make the write fail. Sizes: the task repos are 20 KiB or less. tmpfs pages count against the 256Mi memory limit. An evicted pod ends a run with harness errors (not tested end to end). It is a pod spec change made before any held-out run, so the dev eval was rerun after it. The read-only root filesystem stays a documented gap | Decided |
+| D30 | Nov 17 | Prompt contract B for T5.1 is Tushar's text in `contracts/B-system.txt`, byte for byte (curly quotes included, no trailing newline): 2,695 bytes, SHA-256 `5bd2572217f96e5b5c97a6ce63555ae22a5fbc9ad64902e31d6f2942ba9000c4`, prompt version `3de39bebb4df2df5dc08888860563ab53dbb6511287fa102b6aa2a7f5728e775`. Contract A is the existing system prompt (`contracts/A-system.txt`, 623 bytes, SHA-256 `217dbb8f78d6…`, prompt version `77d9d716f423…`). A and B differ only in the system prompt: the task template, tools and not-complete note are shared, which a test checks on every request. Both are frozen after the B dev smoke run (eval 20261118T030515Z-43a418b4, no mechanical problem). B was not reworded because of dev results. Tests pin both files' bytes and prompt versions | Decided |
 
 ---
 
