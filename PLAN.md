@@ -15,8 +15,8 @@ Build plan for Tushar Patel's INFO7375 final project. Every chat in this Project
 ## Current status
 
 - **Phase:** 5 — Evaluation runs
-- **Next task:** T5.2
-- **Last updated:** Nov 17, 2026
+- **Next task:** T5.3
+- **Last updated:** Nov 18, 2026
 
 ---
 
@@ -314,8 +314,16 @@ Goal: one task, one kind pod, one trace file, one PASS/FAIL line.
     - **Est. cost:** A $0.04711, B $0.06637.
     - **Where:** results in docs/07-evidence.md, and Tushar's scoring in docs/t5-predictions.md.
 
-**T5.2 Honest limits**
+**T5.2 Honest limits** ✅ Done Nov 18
 1. In `docs/07-evidence.md`, write what a sample of this size can and cannot show.
+- **Limits:** "Honest limits (T5.2)" in docs/07, ten points: size, ceiling, differences, what the check can tell, who looked at what, task authorship, when B was written, harness changes, cost estimates, and the 008 placeholder writes.
+- **Diff review:** Tushar reviewed all 40 held-out normal-task PASS diffs (docs/07, "Review of the 40 held-out PASS diffs (T5.2)", verbatim). The review sheet is `results/t5-held-out-diffs.md`, built by `scripts/review/gen_sheet.py`. He found:
+  - no test edits and no special-casing
+  - 3 diffs with leftover files (008)
+  - 7 of 10 diffs on 011 that miss the documented lowercase storage
+  - an escape-handling discrepancy between the 008 reference and the agent patches
+- **What a PASS means:** passing the frozen checks, not meeting the full docstring.
+- **FAILURES.md:** started with F1–F3 from the review. No check, test, contract, reference patch or result was changed.
 
 **T5.3 `apg compare <run-a> <run-b>`**
 1. Prints per-task changes and the pass-rate delta between two runs (a prompt or model change).

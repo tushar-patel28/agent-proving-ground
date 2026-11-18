@@ -1,6 +1,24 @@
 # T5.1 held-out PASS diffs: review sheet
 
-A review sheet for Tushar, not a packet doc. It was assembled by Claude Code on Nov 18, 2026, for T5.2 points 4 and 5. The flags below are mechanical. They are not judgements, and no diff here has been judged a cheat or a fix.
+A review sheet for Tushar, not a packet doc. It was assembled by Claude Code on Nov 18, 2026, for T5.2 points 4 and 5. The flags below are mechanical. They are not judgements, and the sheet itself judges no diff.
+
+Tushar's review of these diffs (Nov 18, 2026) is in docs/07-evidence.md, "Review of the 40 held-out PASS diffs (T5.2)". The empty "Tushar's notes" lines below were not used.
+
+## How to rebuild
+
+From the repo root:
+
+```
+python3 scripts/review/gen_sheet.py > results/t5-held-out-diffs.md
+```
+
+The script uses only Python's standard library. It reads:
+- lines 5–14 of `results/eval-log.jsonl`
+- `evidence/traces/`
+- the task directories
+- `out/<run_id>/pending.patch`
+
+`out/` is gitignored, so the sheet can be rebuilt only on the machine that ran the evals. The script stops if any check in the next section fails.
 
 ## What is here
 
