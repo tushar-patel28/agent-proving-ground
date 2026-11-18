@@ -62,6 +62,8 @@ Every model run before this split was on tasks 001–005, which are all in dev. 
 
 How this was checked (Nov 13, 2026, code inspection):
 - `git log -G 'systemPrompt =|Description: anthropic.String|NotCompleteNote =' -- internal/loop/loop.go` lists e3454c0 (T1.4), a57fb64 and 10abc03, and nothing after 10abc03.
+- Rechecked Nov 17, 2026, including the task-message template, which that search does not match. `git log -G 'You have at most %d turns' -- internal/loop/loop.go` also lists 869d6fb (T2.2) and 0345130 (T3.3). Neither changed the bytes sent. 869d6fb changed only the value filled into the template (`cfg.MaxSteps` became `lim.MaxSteps`). 0345130 moved the unchanged literal `"Task: %s\n\nYou have at most %d turns."` into the constant `taskMessage` and added the prompt-version hash. To confirm, the loop's own code built the first request (system prompt, tools, tool_choice, first user message) and the not-complete note with a fake client at 10abc03, at 0345130's parent, at 0345130 and at da299c3: all four were byte-identical (SHA-256 `e71b6c92fad5…`). So the bytes sent last changed in 10abc03.
+- T5.1 moved the system prompt from a constant in `internal/loop/loop.go` into `contracts/A-system.txt`, byte for byte. Contract A's prompt version is still `77d9d716f423…`, which a test pins.
 - Every trace in `traces/` and `evidence/traces/` has a `task_id` from 001–005. The model runs are all `claude-haiku-5-5`, on 001 (18), 002–005 (4 each). The others are 6 `--no-agent` and 3 scripted runs, all on 001. Test runs write their traces to temporary directories and use fake or scripted clients, never the model.
 
 ## First dev eval (T3.3)
