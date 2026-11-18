@@ -321,3 +321,7 @@ docs/03 has the full table, what the tests do not show, and the two limits that 
   - The cost was $0.01780, against $0.01473–$0.01762.
 
   One run per task cannot separate these differences from run-to-run variation, so none of them is a result about contract B.
+
+## T5.1 held-out runs: pre-registered predictions
+
+Tushar's predictions for the T5.1 held-out runs (contracts A and B) are in [`t5-predictions.md`](t5-predictions.md), saved verbatim. They were committed and pushed on Nov 17, 2026, before any held-out task had been run by a model, so the commit and GitHub timestamps show they came first. Tushar scores them; this document does not.
