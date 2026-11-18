@@ -15,7 +15,7 @@ Build plan for Tushar Patel's INFO7375 final project. Every chat in this Project
 ## Current status
 
 - **Phase:** 5 — Evaluation runs
-- **Next task:** T5.3
+- **Next task:** T6.1
 - **Last updated:** Nov 18, 2026
 
 ---
@@ -325,11 +325,18 @@ Goal: one task, one kind pod, one trace file, one PASS/FAIL line.
 - **What a PASS means:** passing the frozen checks, not meeting the full docstring.
 - **FAILURES.md:** started with F1–F3 from the review. No check, test, contract, reference patch or result was changed.
 
-**T5.3 `apg compare <run-a> <run-b>`**
+**T5.3 `apg compare <run-a> <run-b>`** ✅ Done Nov 18
 1. Prints per-task changes and the pass-rate delta between two runs (a prompt or model change).
 - **Done when:** `apg compare` on the two T5.1 contract runs prints per-task changes and the pass-rate delta.
+- **Command:** `apg compare <side-a> <side-b> [--force] [--log file] [--traces dir]` (`cmd/apg/compare.go`). It is read-only: no model calls, no sandbox, no files written.
+- **Sides:** each side is an eval ID, a list of eval IDs, or a filter (`set`, `contract`, `commit`, `model`).
+- **What it reads and checks:** it reads `results/eval-log.jsonl` and every cited trace strictly, and stops if a trace disagrees with its row.
+- **Warnings:** printed before the tables when the sides differ in set, split hash, model, commit, truncation, runs per task, a task's expected outcome or its contract.json. A different set or split hash is refused unless `--force`.
+- **Output:** per task and in totals (normal, failure, all), with deltas. Failure tasks show "returned FAIL". No significance tests.
+- **Golden test:** on the T5.1 data, it reproduced all 14 per-task rows and 6 per-contract rows of docs/07 exactly, with docs/07 unchanged (`TestCompareT51MatchesDocs07`).
+- **Output saved:** `evidence/compare/20261118-t51-a-vs-b.txt` (fixture output).
 
-**Milestone M5:** comparison results saved, limits written.
+**Milestone M5:** comparison results saved, limits written. (Reached Nov 18 with T5.2 and T5.3.)
 
 ---
 
@@ -452,3 +459,4 @@ Goal: one task, one kind pod, one trace file, one PASS/FAIL line.
 | M2 | Nov 13 | Loop, tools, policy, state, stop, and gate all exist with tests (T2.1–T2.5: tasks 001–005 PASS with claude-haiku-5-5, traces validate against schema v1, evidence/traces/20261113T230736Z-5465d81d … 230904Z-3d625236); synced to the course folder | course repo commit 0429df05 (from agent-proving-ground@cd192a8) |
 | M3 | Nov 13 | Suite frozen, eval command works (T3.1–T3.4: 16 tasks, dev/held-out split frozen at 26b5305; `apg eval --set dev` 7/7 expected-PASS passed and 2/2 failure cases said no, eval 20261114T010304Z-8011b8a0; `apg show` prints every step); synced to the course folder | course repo commit 16227643 (from agent-proving-ground@48ee9c9) |
 | M4 | Nov 17 | Isolation tests pass, results saved (T4.1: every pod limit held from inside a real kind pod, with the pids limit D28 and the disk caps D29; evidence/isolation/20261117-isolation.txt and 20261117-isolation-d29.txt); synced to the course folder | course repo commit 1fe748fa (from agent-proving-ground@e95e947) |
+| M5 | Nov 18 | Comparison results saved, limits written (T5.2: docs/07 "Honest limits (T5.2)" and Tushar's review of the 40 held-out PASS diffs; T5.3: `apg compare` on the T5.1 data, evidence/compare/20261118-t51-a-vs-b.txt); course-folder sync not done yet | evidence/compare/20261118-t51-a-vs-b.txt; results/t5-held-out-diffs.md |
