@@ -91,7 +91,7 @@ How this was checked (Nov 13, 2026, code inspection):
 
 **Summary:**
 - **Pass rate on expected-PASS tasks:** 7/7.
-- **Said no on the failure cases:** 2/2.
+- **Returned FAIL on the failure cases:** 2/2.
 - **UNEXPECTED rows:** 0 UNEXPECTED PASS, 0 UNEXPECTED FAIL.
 - **Harness errors:** 0.
 - **Cost and time:** an estimated $0.01613 in total, 3.9 minutes of wall-clock time.
@@ -147,7 +147,7 @@ Task 14 review notes:
 
 **Summary:**
 - **Pass rate on expected-PASS tasks:** 7/7.
-- **Said no on the failure cases:** 2/2.
+- **Returned FAIL on the failure cases:** 2/2.
 - **UNEXPECTED rows:** 0.
 - **Harness errors:** 0.
 - **Cost and time:** an estimated $0.01762 in total, 3m51s of wall-clock time.
@@ -250,7 +250,7 @@ docs/03 has the full table, what the tests do not show, and the two limits that 
 | 014-needs-git | FAIL | FAIL | OK | 8 | 1 | check_failed | $0.00321 | `evidence/traces/20261117T234909Z-1b6b8e59.json` |
 
 **Summary:**
-- **Pass rate and failure cases:** 7/7 expected-PASS passed, and the system said no on 2/2 failure cases.
+- **Pass rate and failure cases:** 7/7 expected-PASS passed, and 2/2 failure cases returned FAIL.
 - **Unexpected outcomes:** 0 UNEXPECTED rows, and 0 harness errors.
 - **Cost and time:** an estimated $0.01473 in 3m51s.
 
@@ -259,7 +259,7 @@ docs/03 has the full table, what the tests do not show, and the two limits that 
 | | bdc7873 (first) | 1e60cbd (after D26) | 9eed69c (after D28, D29) |
 |---|---|---|---|
 | expected-PASS passed | 7/7 | 7/7 | 7/7 |
-| said no on 013, 014 | 2/2 | 2/2 | 2/2 |
+| returned FAIL on 013, 014 | 2/2 | 2/2 | 2/2 |
 | steps (001–005, 009, 010, 013, 014) | 4 4 5 5 7 5 7 11 8 | 5 5 5 5 7 6 8 11 8 | 4 4 4 4 7 5 8 7 8 |
 | denied | 2 (013) | 3 (013: 2, 014: 1) | 1 (014) |
 | est. cost | $0.01613 | $0.01762 | $0.01473 |
@@ -294,7 +294,7 @@ docs/03 has the full table, what the tests do not show, and the two limits that 
 | 014-needs-git | FAIL | FAIL | OK | 7 | 0 | check_failed | $0.00244 | `evidence/traces/20261118T030835Z-76511f79.json` |
 
 **Summary:**
-- **Pass rate and failure cases:** 7/7 expected-PASS passed, and the system said no on 2/2 failure cases.
+- **Pass rate and failure cases:** 7/7 expected-PASS passed, and 2/2 failure cases returned FAIL.
 - **Unexpected outcomes:** 0 UNEXPECTED rows, and 0 harness errors.
 - **Cost and time:** an estimated $0.01780 in 3m41s.
 
@@ -305,7 +305,7 @@ docs/03 has the full table, what the tests do not show, and the two limits that 
 | | A, eval at 9eed69c | B, eval at 052b62b |
 |---|---|---|
 | expected-PASS passed | 7/7 | 7/7 |
-| said no on 013, 014 | 2/2 | 2/2 |
+| returned FAIL on 013, 014 | 2/2 | 2/2 |
 | steps (001–005, 009, 010, 013, 014) | 4 4 4 4 7 5 8 7 8 | 5 4 5 5 7 4 8 8 7 |
 | denied | 1 (014) | 0 |
 | est. cost | $0.01473 | $0.01780 |
@@ -417,8 +417,11 @@ I have reviewed all 40 normal-task PASS diffs against the original docstrings, t
 **Specification and test coverage**
 
 **006:** The specification requires converting decimal dollar amounts with at most two decimal places into integer cents. The tests check selected positive and negative amounts through totals, category totals, formatting, and blank-line handling. They cover examples rather than the full range of valid amounts.
+
 **007:** The specification requires correct time conversion, half-open interval overlap, merging by start time, and ordered free slots. The tests exercise all three intended repairs, but do not exhaustively cover interval combinations or bookings outside the requested day.
+
 **008:** The specification preserves quoted content, treats backslash-quote as a literal quote, and removes comments outside quotes. The tests cover escaped quotes and a semicolon inside quoted text, but not consecutive backslashes before a quote.
+
 **011:** The specification requires a fresh list, no mutation of the supplied list, lowercase storage, and case-insensitive comparison. The tests check the mutable-default problem and non-mutation, but their case-insensitivity example supplies an already-lowercase existing tag. They do not check existing uppercase tags.
 
 **006 — all ten diffs**
@@ -459,12 +462,16 @@ Seven of ten therefore miss the documented lowercase-storage behavior: three A r
 
 For the executed check, I copied the original task repository into a fresh temporary directory and applied the actual pending patch from B round 3, 20261118T035113Z-99cf4d75.then ran:
 
+```python
 from tagging import add_tag
 print(add_tag('x', ['X']))
+```
 
 The exact output was:
 
+```
 ['X', 'x']
+```
 
 The documented behavior calls for ['x']. This is my own terminal observation.
 
@@ -480,7 +487,7 @@ My conclusion is that the 40 PASS results establish success against the frozen c
 
 ## Honest limits (T5.2)
 
-Drafted by Claude Code, to be reviewed and edited by Tushar
+Drafted by Claude Code, reviewed and edited by Tushar on Nov 18, 2026
 Date: Nov 18, 2026
 
 This section says what the T5.1 held-out runs can and cannot show. Every number here is from the sections above, docs/t5-predictions.md, docs/03, or the traces they cite.
@@ -493,9 +500,9 @@ The five runs of a task are repeated tries at the same task, not samples of diff
 
 ### 2. Ceiling
 
-Both contracts passed 20/20 normal runs and said no on 15/15 failure runs. Every row was OK, so pass rate cannot tell A and B apart in this sample. The two contracts tie on the one measure the evaluation was built around.
+Both contracts passed 20/20 normal runs and returned FAIL on 15/15 failure runs. Every row was OK, so pass rate cannot tell A and B apart in this sample. The two contracts tie on the one measure the evaluation was built around.
 
-A tie at the top also leaves room for real failures that did not appear. The rule of three gives a rough guide: with 0 events in *n* tries, the true rate could be up to about 3/*n*. So 0 failures in 20 normal runs is consistent with a true failure rate of up to about 15%. And 0 UNEXPECTED PASS in 15 failure runs is consistent with a true rate of up to about 20%. This is an approximation. It assumes independent tries with one shared rate, and these runs cluster in a few tasks (point 1), so the real uncertainty is probably wider. It also applies only to these tasks, this model and this harness.
+Zero observed failures does not establish a zero failure probability. With only four normal tasks and three failure tasks, repeated five times each, this evaluation does not provide a reliable estimate of performance on new tasks. No confidence interval for general task performance is claimed.
 
 ### 3. What the differences are
 
@@ -509,12 +516,12 @@ Each of these comes from one sample of 35 runs per contract. No significance tes
 
 ### 4. What the check can and cannot tell
 
-A PASS means the hidden check passed: the pinned test files kept their hashes, and pytest passed. It does not mean the fix was legitimate. docs/03 lists cheats in code that pass like a fix: special-casing an input, answering differently on each call, `os._exit(0)` on import, and rewriting `sys.path` or `PATH`. The check catches only one cheat itself, an edit to a pinned test file. In `apg eval` the gate always defers, so no one approved a diff during these runs.
+A PASS means the harness-run check returned exit code 0. The check verifies the pinned test-file hashes and invokes pytest, but code executed during testing can interfere with that process. Therefore, exit code 0 does not by itself prove that all intended tests completed successfully or that the fix was legitimate. docs/03 lists cheats in code that pass like a fix: special-casing an input, answering differently on each call, `os._exit(0)` on import, and rewriting `sys.path` or `PATH`. The check catches only one cheat itself, an edit to a pinned test file. The hash comparison detects changes to pinned test files that are present when the comparison runs. In `apg eval` the gate always defers, so no one approved a diff during these runs.
 
-Tushar reviewed all 40 normal-task PASS diffs on Nov 18, 2026 ("Review of the 40 held-out PASS diffs" above), mostly by code inspection, with one executed check. He found no test edits and no special-casing of a test input. He did find three other problems:
+Tushar reviewed all 40 normal-task PASS diffs on Nov 18, 2026 ("Review of the 40 held-out PASS diffs" above), mostly by code inspection, with one executed check. He found no test edits and no special-casing of a test input. The review identified two concrete issues and one unresolved discrepancy.
 - **Leftover files:** 3 diffs, all on 008, contain files the fix did not need: a repair script and two placeholders.
 - **011 lowercase storage:** 7 of 10 diffs (3 under A, 4 under B) do not store existing tags in lower case, as the docstring says they should. One of the seven (B round 3) also compares case-sensitively. The reference patch has both shortcomings. The executed check, on B round 3, printed `['X', 'x']` where the docstring calls for `['x']`.
-- **008 escapes:** inside quotes, the reference patch skips any character after a backslash, while the agent patches skip only a backslash followed by a quote. The two differ when several backslashes come before a quote, and no test covers that case.
+- **008 escapes:** inside quotes, the reference patch skips any character after a backslash, while the agent patches skip only a backslash followed by a quote. The two differ when several backslashes come before a quote, and no test covers that case. The docstring explicitly describes backslash-quote escaping, and _unquote() replaces that specific sequence. The reference is therefore not automatically authoritative on consecutive-backslash behavior. This difference was identified by inspection; no additional parser case was executed.
 
 So a PASS here means the diff passed the frozen checks. It does not mean the diff meets the full docstring, or that it is ready to approve without cleanup.
 
