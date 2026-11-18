@@ -15,7 +15,7 @@ Build plan for Tushar Patel's INFO7375 final project. Every chat in this Project
 ## Current status
 
 - **Phase:** 5 — Evaluation runs
-- **Next task:** T5.1 part 2 (held-out runs, contracts A and B)
+- **Next task:** T5.2
 - **Last updated:** Nov 17, 2026
 
 ---
@@ -296,7 +296,7 @@ Goal: one task, one kind pod, one trace file, one PASS/FAIL line.
 
 ## Phase 5 — Evaluation runs (Nov 30 – Dec 3)
 
-**T5.1 Two prompt contracts**
+**T5.1 Two prompt contracts** ✅ Done Nov 17
 1. Write contract A and contract B (for example, terse vs detailed instructions).
 2. Run both on the held-out set, at least 3 runs each, same model and settings.
 - **Done when:** the eval log holds both, with pass rates side by side.
@@ -305,7 +305,14 @@ Goal: one task, one kind pod, one trace file, one PASS/FAIL line.
   - **Flag:** `apg run` and `apg eval` take `--contract A|B` (default A), and traces and eval-log lines record `prompt_contract`.
   - **Prompt versions:** A `77d9d716f423…` (unchanged), B `3de39bebb4df…`. Code commit `052b62b`.
   - **B dev smoke run** (eval 20261118T030515Z-43a418b4, at 052b62b): 7/7 passed, 2/2 said no, 0 UNEXPECTED, 0 denied, 0 harness errors, est. $0.0178. No mechanical problem, and B was not reworded (docs/07).
-  - **Not yet:** the held-out runs (step 2).
+  - **Part 2 done Nov 17:**
+    - **Predictions:** Tushar's predictions were committed and pushed first (`6d7bafe`, docs/t5-predictions.md).
+    - **Runs:** five rounds of held-out × (A, then B) at 6d7bafe, ten eval-log lines (20261118T034100Z-57e06904 … 20261118T035741Z-b3379786), 70 runs, 0 harness errors.
+    - **Normal tasks:** A 20/20, B 20/20.
+    - **Failure tasks:** said no 15/15 under each contract, 0 UNEXPECTED PASS.
+    - **Denied calls:** A 0, B 4 (all on 008).
+    - **Est. cost:** A $0.04711, B $0.06637.
+    - **Where:** results in docs/07-evidence.md, and Tushar's scoring in docs/t5-predictions.md.
 
 **T5.2 Honest limits**
 1. In `docs/07-evidence.md`, write what a sample of this size can and cannot show.
